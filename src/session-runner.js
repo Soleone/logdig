@@ -105,6 +105,7 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
   const dates = new Set();
   const dailyPaths = new Set();
   const errors = [];
+  const sessionResults = [];
 
   for (const [index, session] of sessions.entries()) {
     const progress = { index: index + 1, total: sessions.length, sessionId: session.header.id };
@@ -114,7 +115,9 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
       const closingEvent = lastUserEvent || events.at(-1);
       if (!closingEvent || (range.firstDate && (closingEvent.date < range.firstDate || closingEvent.date > range.lastDate))) {
         sessionsSkipped++;
-        range.onProgress?.({ ...progress, phase: "skipped", status: closingEvent ? "outside date range" : "no journalable events" });
+        const reason = closingEvent ? "outside date range" : "no journalable events";
+        sessionResults.push({ sessionId: session.header.id, status: "skipped", reason });
+        range.onProgress?.({ ...progress, phase: "skipped", status: reason });
         continue;
       }
 
@@ -154,6 +157,17 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
         : await appendDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry);
       if (dailyEntry.appended) entriesAppended++;
       else entriesSkipped++;
+      sessionResults.push({
+        sessionId: journalSession.header.id,
+        project: journalSession.project,
+        date: journalSession.date,
+        time: journalSession.time,
+        entryPresent: !dailyEntry.appended,
+        summaryReused: cached.reused,
+        sourceFingerprint: journalSession.sourceFingerprint,
+        sessionPath: cached.sessionPath,
+        dailyPath: dailyEntry.dailyPath,
+      });
       dates.add(journalSession.date);
       dailyPaths.add(dailyEntry.dailyPath);
       range.onProgress?.({
@@ -167,19 +181,20 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
       });
     } catch (error) {
       errors.push(`${session.header.id}: ${error.message}`);
+      sessionResults.push({ sessionId: session.header.id, status: "error", error: error.message });
       range.onProgress?.({ ...progress, phase: "error", error: error.message });
     }
   }
 
-  return { summariesCreated, summariesReused, entriesAppended, entriesSkipped, sessionsSkipped, dates: [...dates].sort(), dailyPaths: [...dailyPaths].sort(), errors };
+  return { summariesCreated, summariesReused, entriesAppended, entriesSkipped, sessionsSkipped, dates: [...dates].sort(), dailyPaths: [...dailyPaths].sort(), errors, sessionResults };
 }
 
-export function parseBackfillArgument(argument = "") {
+export function parseBackfillArgument(argument = "", command = "backfill") {
   const value = argument.trim().toLowerCase() || "3";
   if (value === "all") return { all: true };
   const days = Number(value);
   if (!/^\d+$/.test(value) || !Number.isInteger(days) || days < 1 || days > 3650) {
-    throw new Error("Usage: logdig backfill [number-of-days|all]. Choose 1 to 3650 days, or 'all'.");
+    throw new Error(`Usage: logdig ${command} [number-of-days|all]. Choose 1 to 3650 days, or 'all'.`);
   }
   return { days };
 }

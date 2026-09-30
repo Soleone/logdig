@@ -2,6 +2,7 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { listJournaledSessions } from "../src/journal.js";
 import { collectSessions, parseBackfillArgument, writeSessions } from "../src/session-runner.js";
 import { createPiModelClient } from "../src/pi-client.js";
 import { spawnPiProcess } from "../src/pi-process.js";
@@ -207,6 +208,117 @@ async function backfill(args) {
   }
 }
 
+function parseStatusArguments(args) {
+  let rangeArgument;
+  let json = false;
+  for (const arg of args) {
+    if (arg === "--json") {
+      json = true;
+    } else if (arg.startsWith("-")) {
+      throw new Error(`Unknown status argument: ${arg}. Run '${commandName} status --help'.`);
+    } else if (rangeArgument !== undefined) {
+      throw new Error(`Usage: ${commandName} status [number-of-days|all] [--json]`);
+    } else {
+      rangeArgument = arg;
+    }
+  }
+  return { range: parseBackfillArgument(rangeArgument, "status"), json };
+}
+
+async function status(args) {
+  const { range, json } = parseStatusArguments(args);
+  const settings = await loadSettings();
+  requireJournalPaths(settings);
+  const found = await collectSessions({
+    sessionDirectory: settings.sessionDirectory,
+    timeZone: settings.timeZone,
+    days: range.days,
+  });
+  const inspection = await writeSessions(
+    { cacheKey: settings.model || "Pi default" },
+    found.sessions,
+    settings,
+    { ...found, dryRun: true },
+  );
+  const previousEntries = await listJournaledSessions(settings.cacheDirectory);
+  const sessions = inspection.sessionResults
+    .filter((session) => !["skipped", "error"].includes(session.status))
+    .map((session) => {
+      const previous = previousEntries.get(session.sessionId) || [];
+      const status = session.entryPresent ? "logged" : previous.length ? "needs-update" : "missing";
+      const hasCurrentSource = previous.some((entry) => entry.sourceFingerprint === session.sourceFingerprint);
+      const sourceChanged = !hasCurrentSource && previous.some((entry) => entry.sourceFingerprint);
+      return {
+        sessionId: session.sessionId,
+        project: session.project,
+        date: session.date,
+        time: session.time,
+        status,
+        ...(status === "needs-update" ? {
+          reason: sourceChanged ? "session changed since its previous journal entry" : "previous journal entry is not current",
+        } : {}),
+        summaryStatus: session.summaryReused ? "cached" : "needs-generation",
+        dailyPath: session.dailyPath,
+      };
+    });
+  const needsUpdate = sessions.filter((session) => session.status === "needs-update").length;
+  const missing = sessions.filter((session) => session.status === "missing").length;
+  const needsModelRequest = sessions.filter((session) => session.summaryStatus === "needs-generation").length;
+  const warnings = [...found.warnings, ...inspection.errors];
+  const report = {
+    timeframe: {
+      kind: range.all ? "all" : "days",
+      ...(range.days ? { days: range.days } : {}),
+      firstDate: found.firstDate || null,
+      lastDate: found.lastDate,
+      timeZone: settings.timeZone,
+    },
+    totals: {
+      scanned: found.sessions.length,
+      eligible: sessions.length,
+      logged: sessions.filter((session) => session.status === "logged").length,
+      needsUpdate,
+      missing,
+      needsModelRequest,
+      skipped: inspection.sessionsSkipped,
+      errors: inspection.errors.length,
+    },
+    sessions,
+    warnings,
+  };
+
+  if (json) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    const label = range.all ? "all saved sessions" : `last ${range.days} calendar day${range.days === 1 ? "" : "s"}`;
+    console.log(`LogDig status: ${label} (${settings.timeZone})${found.firstDate ? ` · ${found.firstDate} through ${found.lastDate}` : ""}`);
+    console.log(`${report.totals.eligible} journalable: ${report.totals.logged} current, ${needsUpdate} need updating, ${missing} missing.`);
+    console.log(`Summaries: ${report.totals.eligible - needsModelRequest} cached, ${needsModelRequest} need model requests.`);
+    const attention = sessions.filter((session) => session.status !== "logged" || session.summaryStatus !== "cached");
+    if (attention.length) {
+      console.log("\nNeeds attention:");
+      for (const session of attention) {
+        const state = session.status === "logged" ? "logged" : session.reason || "not yet logged";
+        const summary = session.summaryStatus === "cached" ? "summary cached" : "summary needs a model request";
+        console.log(`- ${session.date} ${session.time} · ${session.project} · ${state}; ${summary} (${session.sessionId})`);
+        console.log(`  Daily note: ${session.dailyPath}`);
+      }
+    } else if (!sessions.length) {
+      console.log("No journalable sessions found in this timeframe.");
+    } else {
+      console.log("Everything in this timeframe is current.");
+    }
+    if (missing || needsUpdate || needsModelRequest) {
+      console.log(`\nTo update the journal: ${commandName} backfill ${range.all ? "all" : range.days}`);
+    }
+  }
+
+  if (warnings.length) {
+    if (!json) console.error(`Status may be incomplete:\n${warnings.join("\n")}`);
+    process.exitCode = 1;
+  }
+}
+
 function helpText() {
   return [
     "LogDig: a little work journal from your Pi sessions.",
@@ -222,6 +334,7 @@ function helpText() {
     "  logdig config                       show settings and active environment overrides",
     "  logdig backfill [N|all] [--dry-run] [--model provider/model|default]",
     "                                      journal saved sessions (default: last 3 days)",
+    "  logdig status [N|all] [--json]       show journal coverage (default: last 3 days; read-only)",
     "  logdig pi-install | pi-uninstall     add or remove /journal integration",
     "  logdig --version                    show the installed version",
     "",
@@ -237,13 +350,13 @@ function helpText() {
 
 async function main() {
   const [command = "help", ...args] = process.argv.slice(2);
-  const commands = ["init", "config", "doctor", "backfill", "pi-install", "pi-uninstall", "help", "--help", "-h", "--version", "-v"];
+  const commands = ["init", "config", "doctor", "backfill", "status", "pi-install", "pi-uninstall", "help", "--help", "-h", "--version", "-v"];
   if (!commands.includes(command)) throw new Error(`Unknown command: ${command}. Run '${commandName} help'.`);
   if (args.includes("--help") || args.includes("-h")) {
     console.log(helpText());
     return;
   }
-  if (command !== "backfill" && args.length) throw new Error(`'${command}' does not accept arguments. Run '${commandName} help'.`);
+  if (!["backfill", "status"].includes(command) && args.length) throw new Error(`'${command}' does not accept arguments. Run '${commandName} help'.`);
   switch (command) {
     case "--version":
     case "-v": {
@@ -262,6 +375,9 @@ async function main() {
       break;
     case "backfill":
       await backfill(args);
+      break;
+    case "status":
+      await status(args);
       break;
     case "pi-install": {
       const settings = await loadSettings();

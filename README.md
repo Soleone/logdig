@@ -113,11 +113,16 @@ logdig backfill all --dry-run        preview every discoverable saved session
 logdig backfill 7                    journal seven days
 logdig backfill 7 --model provider/model
 logdig backfill 7 --model default    ignore a saved model override for this run
+logdig status                       show coverage for the last 3 calendar days
+logdig status 7                     show coverage for seven days
+logdig status all --json            output coverage for every saved session as JSON
 logdig pi-install                   install the /journal extension
 logdig pi-uninstall                 remove it without deleting notes or summaries
 ```
 
-`--help` works before setup, including `logdig init --help` and `logdig backfill --help`.
+`--help` works before setup, including `logdig init --help`, `logdig backfill --help`, and `logdig status --help`.
+
+`status` is a read-only coverage check. It reports current journal entries, sessions that need updating, missing entries, and whether each summary is cached or needs a model request. It uses the last user message date in your configured timezone. It never calls a model or writes files; scan warnings make the command exit nonzero so incomplete coverage is clear.
 
 New summaries may incur provider charges. Large sessions are summarized in chunks and may need several model requests each. Backfill shows which project it is working on before the model completes. Failed sessions are reported, other sessions continue, and the command exits nonzero if anything needs attention. Fix the issue and rerun the same command; completed summaries are reused, even if a previous attempt failed to write a daily note.
 

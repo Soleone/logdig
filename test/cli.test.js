@@ -102,10 +102,11 @@ async function calls(callsPath) {
 
 test("CLI help and subcommand help work before setup without writing settings", async (t) => {
   const w = await workspace(t, { configured: false });
-  for (const args of [[], ["--help"], ["init", "--help"], ["backfill", "--help"]]) {
+  for (const args of [[], ["--help"], ["init", "--help"], ["backfill", "--help"], ["status", "--help"]]) {
     const result = await runCli(args, w.env);
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /backfill 1 --dry-run/);
+    assert.match(result.stdout, /status \[N\|all\] \[--json\]/);
     assert.match(result.stdout, /no install needed/);
     assert.doesNotMatch(result.stdout, /Daily-notes folder \[/);
   }
@@ -229,6 +230,64 @@ test("a dry run reports project, date, output file, and new summaries without ca
   assert.equal(await readFile(w.filePath, "utf8"), before);
   await assert.rejects(readdir(w.settings.cacheDirectory), { code: "ENOENT" });
   await assert.rejects(readdir(w.settings.dailyDirectory), { code: "ENOENT" });
+});
+
+test("status reports missing, logged, and updated sessions without writes or model calls", async (t) => {
+  const w = await workspace(t);
+  const date = await addSession(w.settings);
+  const missing = await runCli(["status", "1", "--json"], w.env);
+  assert.equal(missing.code, 0, missing.stderr);
+  const missingReport = JSON.parse(missing.stdout);
+  assert.deepEqual(missingReport.totals, {
+    scanned: 1, eligible: 1, logged: 0, needsUpdate: 0, missing: 1, needsModelRequest: 1, skipped: 0, errors: 0,
+  });
+  assert.equal(missingReport.sessions[0].status, "missing");
+  assert.equal(missingReport.sessions[0].summaryStatus, "needs-generation");
+  assert.deepEqual(await calls(w.callsPath), []);
+  await assert.rejects(readdir(w.settings.cacheDirectory), { code: "ENOENT" });
+  await assert.rejects(readdir(w.settings.dailyDirectory), { code: "ENOENT" });
+
+  const saved = await runCli(["backfill", "1"], w.env);
+  assert.equal(saved.code, 0, saved.stderr);
+  const current = await runCli(["status", "1"], w.env);
+  assert.equal(current.code, 0, current.stderr);
+  assert.match(current.stdout, /1 journalable: 1 current, 0 need updating, 0 missing/);
+  assert.match(current.stdout, /Everything in this timeframe is current/);
+
+  const sessionPath = path.join(w.settings.sessionDirectory, "demo-session.jsonl");
+  const originalSession = await readFile(sessionPath, "utf8");
+  const changedTimestamp = Date.now();
+  await writeFile(sessionPath, `${originalSession.trimEnd()}\n${JSON.stringify({
+    type: "message",
+    timestamp: changedTimestamp,
+    message: { role: "user", content: "Also record this follow-up." },
+  })}\n`);
+  const dailyPath = path.join(w.settings.dailyDirectory, `${date}.md`);
+  const dailyBefore = await readFile(dailyPath, "utf8");
+  const changed = await runCli(["status", "1", "--json"], w.env);
+  assert.equal(changed.code, 0, changed.stderr);
+  const changedReport = JSON.parse(changed.stdout);
+  assert.equal(changedReport.sessions[0].status, "needs-update");
+  assert.match(changedReport.sessions[0].reason, /session changed/);
+  assert.equal(changedReport.sessions[0].summaryStatus, "needs-generation");
+  assert.equal(await readFile(dailyPath, "utf8"), dailyBefore);
+  assert.equal((await calls(w.callsPath)).length, 1);
+});
+
+test("status reports malformed history as incomplete JSON and validates its arguments", async (t) => {
+  const w = await workspace(t);
+  await writeFile(path.join(w.settings.sessionDirectory, "broken.jsonl"), "not json");
+  const result = await runCli(["status", "all", "--json"], w.env);
+  assert.equal(result.code, 1);
+  const report = JSON.parse(result.stdout);
+  assert.match(report.warnings[0], /invalid JSON/);
+  assert.equal(report.totals.errors, 0);
+  for (const args of [["status", "0"], ["status", "1", "2"], ["status", "1", "--unknown"]]) {
+    const invalid = await runCli(args, w.env);
+    assert.equal(invalid.code, 1, args.join(" "));
+    assert.match(invalid.stderr, /Usage: .*status|Unknown status argument/);
+  }
+  assert.deepEqual(await calls(w.callsPath), []);
 });
 
 test("real CLI backfill preserves handwritten notes, gives progress, and repeats without duplicate entries or model calls", async (t) => {

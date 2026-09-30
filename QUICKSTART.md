@@ -29,10 +29,11 @@ Press Enter to accept defaults. A typo only re-asks that question. Review the ch
 
 ```sh
 logdig doctor
+logdig status 7
 logdig backfill 1 --dry-run
 ```
 
-The preview shows projects, dates, destination files, cache hits, and which sessions need summarizing. **No model requests, file changes, or new folders.** It does not display transcript excerpts.
+`status` shows what's already journaled, what needs updating or is missing, and which summaries would need a model request. It is read-only. The backfill preview shows projects, dates, destination files, cache hits, and which sessions need summarizing. **Neither command makes model requests or changes files.** The preview does not display transcript excerpts.
 
 `1` means today in your chosen timezone. If nothing happened today:
 

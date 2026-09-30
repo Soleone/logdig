@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sessionMetrics } from "./transcript.js";
 
@@ -185,6 +185,28 @@ export function parseSessionNote(markdown) {
     return undefined;
   }
   return { ...metadata, summary };
+}
+
+export async function listJournaledSessions(cacheDirectory) {
+  const directory = path.join(cacheDirectory, "Entries");
+  let files;
+  try {
+    files = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return new Map();
+    throw error;
+  }
+
+  const sessions = new Map();
+  for (const file of files) {
+    if (!file.isFile() || !file.name.endsWith(".md")) continue;
+    const metadata = frontmatter(await readFile(path.join(directory, file.name), "utf8"));
+    if (typeof metadata.sessionId !== "string") continue;
+    const versions = sessions.get(metadata.sessionId) || [];
+    versions.push({ sourceFingerprint: metadata.sourceFingerprint });
+    sessions.set(metadata.sessionId, versions);
+  }
+  return sessions;
 }
 
 const LEGACY_METRIC_FIELDS = "startedAt|endedAt|durationSeconds|costUsd|cacheReadTokens|inputTokens|outputTokens|cacheWriteTokens";
