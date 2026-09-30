@@ -16,7 +16,7 @@ In the wizard:
 
 - **Daily-notes folder:** choose the folder holding `YYYY-MM-DD.md` notes, for example `My Vault/Daily`.
 - **Summary cache:** choose `My Vault/LogDig` to keep the full summaries visible in Obsidian.
-- **Heading and length:** `# Log` and `small` are a good first try.
+- **Heading and length:** `# Projects` and `small` are a good first try. Your personal `# Log` stays separate.
 - **Timezone:** check that this is the timezone you journal in.
 - **Advanced settings:** leave them alone unless you use a custom Pi history folder, executable, or model.
 - **Automatic capture:** choose **no** for now.
@@ -51,7 +51,7 @@ node ./bin/logdig.js backfill 1
 
 This may send selected, redacted history to your Pi model and incur provider charges. Pi uses its existing authentication. If authentication fails, open Pi, run `/login`, then retry. Common secrets are redacted, but redaction is not a complete secret scanner.
 
-Open the daily-note date printed by the command. You will find a time, project name, and short summary under `# Log`. Your existing text stays in place. Open `<cache folder>/Sessions/<session-id>.md` for all three summary lengths.
+Open the daily-note date printed by the command. You will find project subheadings under `# Projects`, with timestamped summaries grouped beneath each one. Your existing text stays in place. Click a timestamp to open that entry's saved snapshot of all three summary lengths, or browse `<cache folder>/Sessions/<session-id>.md` for the latest session summary.
 
 Repeating an unchanged session reuses its summary and does not insert that entry again. Updated sessions or changed summary settings can append a new version. Run only one save at a time against your journal, and let vault sync finish first.
 

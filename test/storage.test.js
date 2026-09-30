@@ -85,6 +85,7 @@ test("session summaries are cached once and appended without replacing journal c
       project: first.project,
       sessionId: first.header.id,
       cacheFingerprint: firstCache.cacheFingerprint,
+      sessionPath: firstCache.sessionPath,
       summaryLevel: "small",
       summary: firstCache.summary.small,
     });
@@ -99,6 +100,7 @@ test("session summaries are cached once and appended without replacing journal c
       project: first.project,
       sessionId: first.header.id,
       cacheFingerprint: repeatedCache.cacheFingerprint,
+      sessionPath: repeatedCache.sessionPath,
       summaryLevel: "small",
       summary: repeatedCache.summary.small,
     });
@@ -114,6 +116,7 @@ test("session summaries are cached once and appended without replacing journal c
       project: second.project,
       sessionId: second.header.id,
       cacheFingerprint: secondCache.cacheFingerprint,
+      sessionPath: secondCache.sessionPath,
       summaryLevel: "medium",
       summary: secondCache.summary.medium,
     });
@@ -123,10 +126,14 @@ test("session summaries are cached once and appended without replacing journal c
     assert.ok(daily.includes("Original journal intro."));
     assert.ok(daily.includes("Handwritten note stays here."));
     assert.ok(daily.includes("# Other\n\nDo not move this section."));
-    assert.ok(daily.indexOf("09:00 · alpha") < daily.indexOf("10:15 · beta"));
+    assert.ok(daily.indexOf("|09:00]]**") < daily.indexOf("|10:15]]**"));
+    assert.ok(daily.includes("## alpha\n"));
+    assert.ok(daily.includes("## beta\n"));
     assert.ok(daily.includes(layers.small));
     assert.ok(daily.includes("**Goal:** Build the journal."));
-    assert.equal((daily.match(/logdig:[^\n]+:start/g) || []).length, 2);
+    assert.equal((daily.match(/\[\[[a-f0-9]{64}\|/g) || []).length, 2);
+    assert.ok(!daily.includes("<!-- logdig:"));
+    assert.equal(await readFile(firstEntry.entryPath, "utf8"), await readFile(firstCache.sessionPath, "utf8"));
 
     const newDay = await appendDailyEntry(dailyDirectory, "# Pi Log", {
       date: "2026-09-28",
@@ -134,13 +141,14 @@ test("session summaries are cached once and appended without replacing journal c
       project: "gamma",
       sessionId: "session-three",
       cacheFingerprint: "third-cache",
+      sessionPath: firstCache.sessionPath,
       summaryLevel: "small",
       summary: "A new day entry.",
     });
     const newDayNote = await readFile(path.join(dailyDirectory, "2026-09-28.md"), "utf8");
     assert.equal(newDay.appended, true);
     assert.ok(newDayNote.startsWith("# Pi Log\n\n"));
-    assert.match(newDayNote, /\*\*08:30 · gamma\*\*/);
+    assert.match(newDayNote, /## gamma\n\n\*\*\[\[[a-f0-9]{64}\|08:30\]\]\*\*/);
     assert.equal(await readFile(path.join(cacheDirectory, "Sessions", "session-one.md"), "utf8").then((text) => text.includes("# Large")), true);
 
     const customHeader = "## Log";
@@ -156,12 +164,15 @@ test("session summaries are cached once and appended without replacing journal c
         project: sessionId,
         sessionId,
         cacheFingerprint: `cache-${sessionId}`,
+        sessionPath: firstCache.sessionPath,
         summaryLevel,
         summary: text,
       });
     }
     const customDaily = await readFile(customDailyPath, "utf8");
-    assert.ok(customDaily.indexOf("08:00 · delta") < customDaily.indexOf("09:00 · epsilon"));
+    assert.ok(customDaily.indexOf("|08:00]]**") < customDaily.indexOf("|09:00]]**"));
+    assert.ok(customDaily.includes("### delta\n"));
+    assert.ok(customDaily.includes("### epsilon\n"));
     assert.ok(customDaily.includes("## Goal"));
     assert.ok(customDaily.includes("Manual section."));
     assert.ok(customDaily.includes("## More\n\nKeep this too."));

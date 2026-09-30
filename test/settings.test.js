@@ -20,6 +20,20 @@ test("settings use the standard per-machine config location for each OS", () => 
   );
 });
 
+test("new settings default to Projects while saved headings and overrides remain explicit", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "logdig-project-settings-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, "settings.json");
+  const initial = await loadSettings({ filePath, env: {}, home: root });
+  assert.equal(initial.dailyHeader, "# Projects");
+  const required = { cacheDirectory: path.join(root, "cache"), dailyDirectory: path.join(root, "daily"), timeZone: "UTC" };
+  await saveSettings(required, filePath);
+  assert.equal((await loadSettings({ filePath, env: {}, home: root })).dailyHeader, "# Projects");
+  await saveSettings({ ...required, dailyHeader: "# Log" }, filePath);
+  assert.equal((await loadSettings({ filePath, env: {}, home: root })).dailyHeader, "# Log");
+  assert.equal((await loadSettings({ filePath, env: { PI_JOURNAL_DAILY_HEADER: "## Custom" }, home: root })).dailyHeader, "## Custom");
+});
+
 test("settings round-trip without storing credentials and environment values override them", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "logdig-settings-"));
   const filePath = path.join(root, "config", "settings.json");

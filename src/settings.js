@@ -38,7 +38,7 @@ function defaults({ env = process.env, home = homedir() } = {}) {
     version: 1,
     cacheDirectory: undefined,
     dailyDirectory: undefined,
-    dailyHeader: "# Log",
+    dailyHeader: "# Projects",
     dailySummary: "small",
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     sessionDirectory: path.join(expandPath(agentDirectory, home), "sessions"),
@@ -57,11 +57,11 @@ export function validateSettings(settings, { requirePaths = false, home = homedi
     if (!["small", "medium", "large"].includes(settings.dailySummary)) throw new Error("dailySummary must be small, medium, or large");
   }
   if (typeof settings.dailyHeader !== "string" || !settings.dailyHeader.trim()) {
-    throw new Error("dailyHeader must be one Markdown heading, such as '# Log'");
+    throw new Error("dailyHeader must be one Markdown heading, such as '# Projects'");
   }
   settings.dailyHeader = settings.dailyHeader.trim();
   if (!/^#{1,6}\s+[^\r\n]+$/.test(settings.dailyHeader)) {
-    throw new Error("dailyHeader must be one Markdown heading, such as '# Log'");
+    throw new Error("dailyHeader must be one Markdown heading, such as '# Projects'");
   }
   if (typeof settings.timeZone !== "string" || !settings.timeZone.trim()) throw new Error("timeZone must be a valid timezone");
   try {
@@ -137,7 +137,7 @@ export async function saveSettings(settings, filePath = settings.filePath || set
     version: 1,
     cacheDirectory: settings.cacheDirectory,
     dailyDirectory: settings.dailyDirectory,
-    dailyHeader: settings.dailyHeader || "# Log",
+    dailyHeader: settings.dailyHeader || "# Projects",
     dailySummary: settings.dailySummary || "small",
     timeZone: settings.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     sessionDirectory: settings.sessionDirectory,

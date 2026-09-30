@@ -67,6 +67,7 @@ export async function configureLogDig(settings, commandName = "logdig") {
     console.log("The cache keeps all three summary lengths. Put it inside your vault to browse it in Obsidian.");
     const cacheDirectory = await ask("Summary cache folder", settings.cacheDirectory || path.join(path.dirname(dailyDirectory), "LogDig"),
       (value) => folder("cacheDirectory", value, true));
+    console.log("Entries are grouped by project, then by time, under this heading. Use # Projects to keep your personal log separate.");
     const dailyHeader = await ask("Heading for journal entries", settings.dailyHeader, (value) => field("dailyHeader", value));
     console.log("Small: a few sentences. Medium: goal, progress, and next steps. Large: a short timeline.");
     const dailySummary = await ask("Daily summary (small/medium/large)", settings.dailySummary, (value) => field("dailySummary", value));

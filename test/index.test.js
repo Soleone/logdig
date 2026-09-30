@@ -106,7 +106,7 @@ test("journal command appends the chosen layer under the configured header at th
     const daily = await readFile(path.join(dailyDirectory, "2026-09-28.md"), "utf8");
     assert.ok(daily.includes("My existing note."));
     assert.ok(daily.includes("Handwritten content."));
-    assert.ok(daily.includes("**00:01 · example-project**"));
+    assert.match(daily, /## example-project\n\n\*\*\[\[[a-f0-9]{64}\|00:01\]\]\*\*/);
     assert.ok(daily.includes("- **Goal:** Finish the task."));
     assert.ok(!daily.includes("Short layer should not be inserted."));
     assert.ok(!daily.includes("Long layer should remain cached"));
@@ -114,7 +114,7 @@ test("journal command appends the chosen layer under the configured header at th
     await command("", ctx);
     assert.equal(modelCalls, 1);
     const repeated = await readFile(path.join(dailyDirectory, "2026-09-28.md"), "utf8");
-    assert.equal((repeated.match(/logdig:[^\n]+:start/g) || []).length, 1);
+    assert.equal((repeated.match(/\[\[[a-f0-9]{64}\|/g) || []).length, 1);
     assert.deepEqual(await readdir(path.join(cacheDirectory, "Sessions")), ["session-one.md"]);
   } finally {
     for (const key of environmentKeys) {

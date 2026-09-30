@@ -41,7 +41,7 @@ else {
   const settings = {
     cacheDirectory: path.join(root, "vault", "LogDig"),
     dailyDirectory: path.join(root, "vault", "Daily Notes"),
-    dailyHeader: "# Log",
+    dailyHeader: "# Projects",
     dailySummary: "small",
     timeZone: "UTC",
     sessionDirectory,
@@ -127,6 +127,8 @@ test("setup explains choices and recovers locally from invalid paths, headings, 
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Let's try that again/);
   assert.match(result.stdout, /Ready to save/);
+  assert.match(result.stdout, /Heading for journal entries \[# Projects\]/);
+  assert.match(result.stdout, /grouped by project, then by time/);
   assert.match(result.stdout, /No history is summarized/);
   assert.match(result.stderr, /Environment overrides are active/);
   const saved = await loadSettings({ filePath: w.filePath, env: {}, home: w.root });
@@ -234,9 +236,12 @@ test("real CLI backfill preserves handwritten notes, gives progress, and repeats
   assert.match(first.stdout, /Saved: 1 summary created/);
   const daily = await readFile(dailyPath, "utf8");
   for (const text of ["Personal writing stays here.", "A handwritten log.", "# Tomorrow\n\nDon't lose this."]) assert.ok(daily.includes(text));
-  assert.equal((daily.match(/logdig:[^\n]+:start/g) || []).length, 1);
+  assert.equal((daily.match(/\[\[[a-f0-9]{64}\|/g) || []).length, 1);
+  const entryId = daily.match(/\[\[([a-f0-9]{64})\|/)[1];
+  const snapshot = await readFile(path.join(w.settings.cacheDirectory, "Entries", `${entryId}.md`), "utf8");
   const cache = await readFile(path.join(w.settings.cacheDirectory, "Sessions", "demo-session.md"), "utf8");
   for (const heading of ["# Small", "# Medium", "# Large"]) assert.ok(cache.includes(heading));
+  assert.equal(snapshot, cache);
   const second = await runCli(["backfill", "1"], w.env);
   assert.equal(second.code, 0, second.stderr);
   assert.match(second.stdout, /0 summaries created, 1 reused.*1 already present/);
@@ -245,6 +250,7 @@ test("real CLI backfill preserves handwritten notes, gives progress, and repeats
   assert.match(preview.stdout, /Would create 0 summaries, reuse 1, append 0 daily entries; 1 already present/);
   assert.equal(await readFile(dailyPath, "utf8"), daily);
   assert.equal(await readFile(path.join(w.settings.cacheDirectory, "Sessions", "demo-session.md"), "utf8"), cache);
+  assert.equal(await readFile(path.join(w.settings.cacheDirectory, "Entries", `${entryId}.md`), "utf8"), snapshot);
   assert.equal((await calls(w.callsPath)).length, 1);
 });
 

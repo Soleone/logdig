@@ -268,13 +268,19 @@ function addEntryAt(markdown, offset, entry) {
   return `${before}${separator}${entry}${suffix}${after}`;
 }
 
-function appendUnderHeading(markdown, heading, entry) {
+function appendUnderProject(markdown, heading, entry) {
   const targetLevel = headingLevel(heading);
+  const project = entry.project.replace(/[\\`*_[\]<>|&#\r\n]/g, (character) =>
+    /[\r\n]/.test(character) ? " " : `&#${character.charCodeAt(0)};`);
+  const projectHeading = targetLevel < 6 ? `${"#".repeat(targetLevel + 1)} ${project}` : `**Project: ${project}**`;
+  const text = dailyEntryText(entry, heading);
   let lineStart = 0;
   let sectionStart = -1;
   let sectionEnd = markdown.length;
+  let projectStart = -1;
+  let projectEnd;
+  let nextTimestamp;
   let insideGeneratedEntry = false;
-  let lastGeneratedEntryEnd = -1;
   let fence;
   let insideFrontmatter = /^---\r?\n/.test(markdown);
 
@@ -295,7 +301,6 @@ function appendUnderHeading(markdown, heading, entry) {
     if (insideGeneratedEntry && /^<!-- logdig:[a-f0-9]{64}:end -->$/.test(line)) {
       insideGeneratedEntry = false;
       fence = undefined;
-      lastGeneratedEntryEnd = newline === -1 ? lineEnd : newline + 1;
     } else if (!blocked) {
       if (sectionStart === -1 && line.trimEnd() === heading) {
         sectionStart = lineStart;
@@ -308,6 +313,13 @@ function appendUnderHeading(markdown, heading, entry) {
             sectionEnd = lineStart;
             break;
           }
+          const isProjectHeading = targetLevel < 6 ? level === targetLevel + 1 : /^\*\*Project: .+\*\*$/.test(line);
+          if (projectStart !== -1 && projectEnd === undefined && isProjectHeading) projectEnd = lineStart;
+          if (projectStart === -1 && line.trimEnd() === projectHeading) projectStart = lineStart;
+          if (projectStart !== -1 && projectEnd === undefined && nextTimestamp === undefined) {
+            const timestamp = line.match(/^\*\*\[\[[a-f0-9]{64}\|(\d{2}:\d{2})\]\]\*\*$/)?.[1];
+            if (timestamp && timestamp > entry.time) nextTimestamp = lineStart;
+          }
         }
       }
     }
@@ -318,42 +330,46 @@ function appendUnderHeading(markdown, heading, entry) {
 
   if (sectionStart === -1) {
     const separator = !markdown ? "" : markdown.endsWith("\n\n") ? "" : markdown.endsWith("\n") ? "\n" : "\n\n";
-    return `${markdown}${separator}${heading}\n\n${entry}\n`;
+    return `${markdown}${separator}${heading}\n\n${projectHeading}\n\n${text}\n`;
   }
 
-  const insertionOffset = lastGeneratedEntryEnd === -1 ? sectionEnd : lastGeneratedEntryEnd;
-  return addEntryAt(markdown, insertionOffset, entry);
+  if (projectStart === -1) return addEntryAt(markdown, sectionEnd, `${projectHeading}\n\n${text}`);
+  return addEntryAt(markdown, nextTimestamp ?? projectEnd ?? sectionEnd, text);
 }
 
-function dailyEntryMarker(entry, heading) {
+export function dailyEntryId(entry, heading) {
   return hashValue([entry.sessionId, entry.cacheFingerprint, entry.summaryLevel, heading]);
 }
 
 function dailyEntryText(entry, heading) {
-  const marker = dailyEntryMarker(entry, heading);
-  return [
-    `<!-- logdig:${marker}:start -->`,
-    `**${entry.time} · ${entry.project}**`,
-    "",
-    entry.summary,
-    "",
-    `<!-- logdig:${marker}:end -->`,
-  ].join("\n");
+  const id = dailyEntryId(entry, heading);
+  // Daily notes stay section-safe; structured headings and code live in the linked note.
+  const summary = entry.summary.split(/\r?\n/)
+    .map((line) => /^ {0,3}(`{3,}|~{3,})/.test(line) ? "" : line.replace(/^( {0,3})(#{1,6})(?=\s)/, "$1\\$2"))
+    .join("\n").trim();
+  return [`**[[${id}|${entry.time}]]**`, "", summary].join("\n");
 }
 
 export async function inspectDailyEntry(dailyDirectory, heading, entry) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.date)) throw new Error(`Invalid journal date: ${entry.date}`);
   const dailyPath = path.join(dailyDirectory, `${entry.date}.md`);
   const existing = await readMarkdownIfPresent(dailyPath) || "";
-  const marker = `<!-- logdig:${dailyEntryMarker(entry, heading)}:start -->`;
-  return { dailyPath, existing, appended: !existing.includes(marker) };
+  const id = dailyEntryId(entry, heading);
+  const present = existing.includes(`<!-- logdig:${id}:start -->`) ||
+    existing.split(/\r?\n/).some((line) => line.startsWith("**") &&
+      (line.startsWith(`**[[${id}|`) || line.includes(` · [[${id}|`)) && line.endsWith("]]**"));
+  return { dailyPath, existing, appended: !present };
 }
 
 export async function appendDailyEntry(dailyDirectory, heading, entry) {
   const { dailyPath, existing, appended } = await inspectDailyEntry(dailyDirectory, heading, entry);
   if (!appended) return { dailyPath, appended: false };
 
-  const markdown = appendUnderHeading(existing, heading, dailyEntryText(entry, heading));
+  const entryPath = path.join(path.dirname(entry.sessionPath), "..", "Entries", `${dailyEntryId(entry, heading)}.md`);
+  if (await readMarkdownIfPresent(entryPath) === undefined) {
+    await writeAtomically(entryPath, await readFile(entry.sessionPath, "utf8"));
+  }
+  const markdown = appendUnderProject(existing, heading, entry);
   await writeAtomically(dailyPath, markdown);
-  return { dailyPath, appended: true };
+  return { dailyPath, entryPath, appended: true };
 }

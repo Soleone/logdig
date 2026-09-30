@@ -1,0 +1,84 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { appendDailyEntry, inspectDailyEntry } from "../src/journal.js";
+
+async function workspace(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "logdig-projects-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const daily = path.join(root, "daily");
+  const sessionPath = path.join(root, "cache", "Sessions", "one.md");
+  await mkdir(path.dirname(sessionPath), { recursive: true });
+  await mkdir(daily);
+  await writeFile(sessionPath, "Full summary.\n");
+  const date = "2026-09-28";
+  const entry = { date, time: "11:00", project: "alpha", sessionId: "one", cacheFingerprint: "cache-one", summaryLevel: "small", summary: "Made progress.", sessionPath };
+  return { daily, entry, dailyPath: path.join(daily, `${date}.md`) };
+}
+
+test("interleaved projects form one group each and older backfills sort within their project", async (t) => {
+  const { daily, entry, dailyPath } = await workspace(t);
+  const personal = "# Log\n\n- 10:00 My personal log.\n\n";
+  const tasks = "# Tasks\n\nKeep these tasks.\n";
+  await writeFile(dailyPath, `${personal}# Projects\n\nProject introduction.\n\n${tasks}`);
+  for (const [sessionId, project, time] of [["one", "alpha", "11:00"], ["two", "beta", "10:00"], ["three", "alpha", "09:00"], ["four", "alpha", "10:00"], ["five", "beta", "08:00"]]) {
+    const version = { ...entry, sessionId, project, time, summary: `${project} at ${time}.` };
+    assert.equal((await appendDailyEntry(daily, "# Projects", version)).appended, true);
+    assert.equal((await inspectDailyEntry(daily, "# Projects", version)).appended, false);
+  }
+  const text = await readFile(dailyPath, "utf8");
+  assert.ok(text.startsWith(personal + "# Projects\n\nProject introduction."));
+  assert.ok(text.endsWith(tasks));
+  assert.equal((text.match(/^## alpha$/gm) || []).length, 1);
+  assert.equal((text.match(/^## beta$/gm) || []).length, 1);
+  const alpha = text.slice(text.indexOf("## alpha"), text.indexOf("## beta"));
+  assert.deepEqual([...alpha.matchAll(/\[\[[a-f0-9]{64}\|(\d{2}:\d{2})\]\]/g)].map((match) => match[1]), ["09:00", "10:00", "11:00"]);
+  const beta = text.slice(text.indexOf("## beta"), text.indexOf("# Tasks"));
+  assert.deepEqual([...beta.matchAll(/\[\[[a-f0-9]{64}\|(\d{2}:\d{2})\]\]/g)].map((match) => match[1]), ["08:00", "10:00"]);
+  assert.ok(!text.includes("<!-- logdig:"));
+});
+
+test("group discovery ignores frontmatter, code examples, and other sections", async (t) => {
+  const { daily, entry, dailyPath } = await workspace(t);
+  const prefix = "---\nexample: |\n# Projects\n## alpha\n---\n\n# Log\n\n```md\n# Projects\n## alpha\n```\n\n";
+  const original = prefix + "# Projects\n\n```md\n## alpha\n```\n\n## beta\n\nHandwritten beta context.\n\n# Tasks\n\n## alpha\n\nTask context.\n";
+  await writeFile(dailyPath, original);
+  await appendDailyEntry(daily, "# Projects", entry);
+  await appendDailyEntry(daily, "# Projects", { ...entry, sessionId: "two", time: "09:00" });
+  await appendDailyEntry(daily, "# Projects", { ...entry, sessionId: "three", project: "beta", time: "10:00" });
+  const text = await readFile(dailyPath, "utf8");
+  assert.ok(text.startsWith(prefix));
+  assert.ok(text.includes("## beta\n\nHandwritten beta context."));
+  assert.ok(text.endsWith("# Tasks\n\n## alpha\n\nTask context.\n"));
+  const projects = text.slice(prefix.length, text.indexOf("# Tasks"));
+  assert.equal((projects.match(/^## alpha$/gm) || []).length, 2); // One code example, one actual group.
+  assert.ok(projects.indexOf("|09:00]]**") < projects.indexOf("|11:00]]**"));
+  assert.ok(projects.indexOf("|10:00]]**") < projects.lastIndexOf("## alpha"));
+});
+
+test("same-time entries stay stable and special project names reuse their group", async (t) => {
+  const { daily, entry, dailyPath } = await workspace(t);
+  for (const sessionId of ["one", "two", "three"]) {
+    await appendDailyEntry(daily, "# Projects", { ...entry, sessionId, project: "a[b]|c", summary: sessionId });
+  }
+  const text = await readFile(dailyPath, "utf8");
+  assert.equal((text.match(/^## a&#91;b&#93;&#124;c$/gm) || []).length, 1);
+  assert.ok(text.indexOf("\n\none\n") < text.indexOf("\n\ntwo\n"));
+  assert.ok(text.indexOf("\n\ntwo\n") < text.indexOf("\n\nthree\n"));
+});
+
+test("level-six custom sections use bold project labels without breaking Markdown headings", async (t) => {
+  const { daily, entry, dailyPath } = await workspace(t);
+  const heading = "###### Projects";
+  for (const [sessionId, project, time] of [["one", "alpha", "11:00"], ["two", "beta", "10:00"], ["three", "alpha", "09:00"]]) {
+    await appendDailyEntry(daily, heading, { ...entry, sessionId, project, time });
+  }
+  const text = await readFile(dailyPath, "utf8");
+  assert.ok(text.startsWith(heading + "\n\n**Project: alpha**"));
+  assert.equal((text.match(/^\*\*Project: alpha\*\*$/gm) || []).length, 1);
+  assert.ok(text.indexOf("|09:00]]**") < text.indexOf("|11:00]]**"));
+  assert.ok(text.indexOf("|11:00]]**") < text.indexOf("**Project: beta**"));
+  assert.ok(!text.includes("#######"));
+});

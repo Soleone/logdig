@@ -3,14 +3,23 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { appendDailyEntry, parseSessionNote, renderSessionNote } from "../src/journal.js";
+import { appendDailyEntry, dailyEntryId, inspectDailyEntry, parseSessionNote, renderSessionNote } from "../src/journal.js";
 
 async function dailyFolder(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "logdig-markdown-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const daily = path.join(root, "daily");
   await mkdir(daily);
+  const cache = path.join(root, "cache", "Sessions");
+  await mkdir(cache, { recursive: true });
+  await writeFile(path.join(cache, "one.md"), "Full session summary.\n");
   return daily;
+}
+
+function appendEntry(daily, heading, entry) {
+  return appendDailyEntry(daily, heading, {
+    ...entry, sessionPath: path.join(daily, "..", "cache", "Sessions", "one.md"),
+  });
 }
 
 const entry = {
@@ -23,14 +32,17 @@ test("daily insertion ignores headings in frontmatter and fenced code, including
   const prefix = "---\nexample: |\n# Log\n---\n\n# My day\n\n```markdown\n# Log\n```\n\n~~~\n# Log\n~~~\n\n";
   const original = prefix + "# Log   \n\nMy own words.\n\n# Personal\n\nKeep this section.\n";
   await writeFile(filePath, original);
-  await appendDailyEntry(daily, "# Log", { ...entry, summary: "A code example:\n\n```markdown\n# Personal\n```" });
-  await appendDailyEntry(daily, "# Log", { ...entry, sessionId: "two", cacheFingerprint: "cache-two", time: "10:00" });
+  await appendEntry(daily, "# Log", { ...entry, summary: "A code example:\n\n```markdown\n# Personal\n```" });
+  await appendEntry(daily, "# Log", { ...entry, sessionId: "two", cacheFingerprint: "cache-two", time: "10:00" });
   const updated = await readFile(filePath, "utf8");
   assert.ok(updated.startsWith(prefix + "# Log   \n\nMy own words."));
   assert.ok(updated.includes("# Personal\n\nKeep this section."));
-  assert.ok(updated.indexOf("**09:00 · demo**") > prefix.length);
-  assert.ok(updated.indexOf("**10:00 · demo**") > updated.indexOf("**09:00 · demo**"));
-  assert.ok(updated.indexOf("**10:00 · demo**") < updated.indexOf("# Personal\n\nKeep this section."));
+  assert.ok(updated.includes("## demo\n"));
+  assert.ok(updated.indexOf("|09:00]]**") > prefix.length);
+  assert.ok(updated.indexOf("|10:00]]**") > updated.indexOf("|09:00]]**"));
+  assert.ok(updated.indexOf("|10:00]]**") < updated.indexOf("# Personal\n\nKeep this section."));
+  assert.ok(updated.includes("\\# Personal"));
+  assert.ok(!updated.slice(prefix.length).includes("```"));
 });
 
 test("a heading only present in a code example is not used as the insertion point", async (t) => {
@@ -38,10 +50,10 @@ test("a heading only present in a code example is not used as the insertion poin
   const filePath = path.join(daily, `${entry.date}.md`);
   const original = "# My day\n\nExample:\n\n```md\n# Log\n```\n\nHandwritten ending.\n";
   await writeFile(filePath, original);
-  await appendDailyEntry(daily, "# Log", entry);
+  await appendEntry(daily, "# Log", entry);
   const updated = await readFile(filePath, "utf8");
   assert.ok(updated.startsWith(original));
-  assert.match(updated.slice(original.length), /^\n# Log\n\n<!-- logdig:/);
+  assert.match(updated.slice(original.length), /^\n# Log\n\n## demo\n\n\*\*\[\[[a-f0-9]{64}\|09:00\]\]\*\*/);
 });
 
 test("cached summary layers round-trip without treating nested or fenced headings as layer boundaries", () => {

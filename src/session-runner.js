@@ -143,6 +143,7 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
         project: journalSession.project,
         sessionId: journalSession.header.id,
         cacheFingerprint: cached.cacheFingerprint,
+        sessionPath: cached.sessionPath,
         summaryLevel: settings.dailySummary,
         summary: cached.summary?.[settings.dailySummary],
       };

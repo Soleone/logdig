@@ -24,7 +24,7 @@ For a comfortable first try:
 
 - Choose the folder **inside your vault** holding your daily notes, such as `My Vault/Daily`.
 - Put the summary cache in `My Vault/LogDig` if you want to browse it in Obsidian.
-- Keep the `# Log` heading and **small** summary unless you prefer otherwise.
+- Keep the `# Projects` heading and **small** summary unless you prefer otherwise. Your personal `# Log` section stays separate.
 - Check the timezone. It determines the journal date and time.
 - Leave automatic capture **off** until you have tried a manual run. Pi integration is optional.
 
@@ -53,15 +53,35 @@ With `My Vault/Daily` and `My Vault/LogDig` selected:
 ```text
 My Vault/
 ├── Daily/
-│   └── YYYY-MM-DD.md             your writing, plus the chosen summary under # Log
+│   └── YYYY-MM-DD.md             your writing, plus project-grouped summaries under # Projects
 └── LogDig/
-    └── Sessions/
-        └── <session-id>.md       all three summary lengths and provenance
+    ├── Sessions/
+    │   └── <session-id>.md       latest cached summary and provenance
+    └── Entries/
+        └── <entry-id>.md         snapshot of all three layers for a journal entry
 ```
 
-Daily entries start with the local time and project name. The **last user message** supplies the date and time, even if the assistant finishes after midnight. Alternate session branches are included as explorations, not assumed to be the final result.
+Daily entries live under `# Projects`, grouped by project in first-seen order, with timestamps sorted within each project:
 
-Unchanged sessions reuse their summaries. Markers prevent the same unchanged entry from being appended again. Changing the session, timezone, explicit model, summary level, or heading can append a **new version** rather than replace an earlier journal entry. Existing journal text is not edited, and headings inside frontmatter or fenced code are not insertion targets.
+```markdown
+# Projects
+
+## my-project
+
+**[[<entry-id>|20:54]]**
+
+A short summary.
+
+**[[<another-entry-id>|21:19]]**
+
+More work on the same project.
+```
+
+Obsidian displays each link as just the timestamp; clicking it opens that entry's detailed summary. Keep the summary cache inside your vault so Obsidian can resolve these links. Daily summaries do not create headings or code fences; structured detail stays in the linked note. Custom section headings are supported, with project subheadings one level deeper (or bold project labels beneath a level-six heading).
+
+The **last user message** supplies the date and time, even if the assistant finishes after midnight. Alternate session branches are included as explorations, not assumed to be the final result.
+
+Unchanged sessions reuse their summaries. The identifier in each timestamp link prevents duplicate entries, without HTML comments. Older project-name links and comment-wrapped entries are still recognized. Changing the default does not override existing saved heading preferences; rerun setup to change them. Changing the session, timezone, explicit model, summary level, or heading can append a **new version** rather than replace an earlier journal entry. Linked entry notes keep their original summary even when the latest session cache changes. Existing journal text is not edited, and headings inside frontmatter or fenced code are not insertion targets.
 
 Missing daily-note and cache folders are created only by a real save. Raw Pi history stays in Pi's storage.
 
