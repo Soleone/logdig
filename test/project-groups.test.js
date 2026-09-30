@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { appendDailyEntry, inspectDailyEntry } from "../src/journal.js";
+import { writeSessions } from "../src/session-runner.js";
 
 async function workspace(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "logdig-projects-"));
@@ -17,6 +18,25 @@ async function workspace(t) {
   const entry = { date, time: "11:00", project: "alpha", sessionId: "one", cacheFingerprint: "cache-one", summaryLevel: "small", summary: "Made progress.", sessionPath };
   return { daily, entry, dailyPath: path.join(daily, `${date}.md`) };
 }
+
+test("try directories for the same project share a cleanly named group", async (t) => {
+  const { daily, entry, dailyPath } = await workspace(t);
+  const settings = { cacheDirectory: path.dirname(path.dirname(entry.sessionPath)), dailyDirectory: daily, dailyHeader: "# Projects", dailySummary: "small", timeZone: "UTC" };
+  const sessions = ["2026-01-17-learn", "2026-09-27-learn"].map((directory, index) => ({
+    header: { id: `try-${index}`, cwd: `/work/${directory}` },
+    entries: [{ type: "message", timestamp: new Date(Date.UTC(2026, 8, 28, 9 + index)).toISOString(), message: { role: "user", content: "Made progress." } }],
+  }));
+  const model = { complete: async () => JSON.stringify({ small: "Made progress.", medium: "Details.", large: "Timeline." }) };
+  const result = await writeSessions(model, sessions, settings);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.entriesAppended, 2);
+  const text = await readFile(dailyPath, "utf8");
+  assert.equal((text.match(/^## learn$/gm) || []).length, 1);
+  assert.ok(!text.includes("## 2026-"));
+  assert.ok(text.includes("|09:00]]**"));
+  assert.ok(text.includes("|10:00]]**"));
+  assert.equal((await writeSessions(model, sessions, settings)).entriesSkipped, 2);
+});
 
 test("interleaved projects form one group each and older backfills sort within their project", async (t) => {
   const { daily, entry, dailyPath } = await workspace(t);

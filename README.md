@@ -61,7 +61,9 @@ My Vault/
         └── <entry-id>.md         snapshot of all three layers for a journal entry
 ```
 
-Daily entries live under `# Projects`, grouped by project in first-seen order, with timestamps sorted within each project:
+Daily entries live under `# Projects`, grouped by project in first-seen order, with timestamps sorted within each project. For [try](https://github.com/tobi/try)-style directories, a leading `YYYY-MM-DD-` is omitted from the project label: `2026-01-17-learn` becomes `learn`. The source path is unchanged.
+
+For example:
 
 ```markdown
 # Projects

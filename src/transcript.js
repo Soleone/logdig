@@ -213,7 +213,7 @@ export function eventsForSession(session, timeZone) {
   const events = [];
   const toolCalls = new Map();
   const cwd = session.header.cwd || "";
-  const project = cwd ? path.basename(cwd) || "unknown project" : "unknown project";
+  const project = (cwd ? path.basename(cwd) : "").replace(/^\d{4}-\d{2}-\d{2}-(?=.)/, "") || "unknown project";
 
   for (const entry of session.entries) {
     const generated = eventFor(entry, timeZone, toolCalls);

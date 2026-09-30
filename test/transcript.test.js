@@ -64,6 +64,29 @@ test("session event extraction groups by local date and keeps evidence, not thin
   assert.ok(!JSON.stringify(events).includes("private reasoning"));
 });
 
+test("try directory dates are removed from project labels without changing source paths", () => {
+  for (const [cwd, project] of [
+    ["/work/2026-01-17-learn", "learn"],
+    ["/work/2026-09-27-logdig", "logdig"],
+    ["/work/2026-01-17-my-project", "my-project"],
+    ["/work/plain-project", "plain-project"],
+    ["/work/my-2026-01-17-project", "my-2026-01-17-project"],
+    ["/work/2026-01-17", "2026-01-17"],
+    ["/work/2026-01-17-", "2026-01-17-"],
+    ["/", "unknown project"],
+    ["", "unknown project"],
+  ]) {
+    const session = {
+      header: { id: "try-session", cwd },
+      entries: [message("u1", null, "2026-09-28T12:00:00Z", "user", "Made progress.")],
+    };
+    const events = eventsForSession(session, "UTC");
+    assert.equal(events[0].project, project);
+    assert.equal(events[0].cwd, cwd);
+    assert.equal(session.header.cwd, cwd);
+  }
+});
+
 test("sessionFromJsonl parses the header and preserves the file's append order", () => {
   const source = [
     { type: "session", id: "s1", cwd: "/work/demo" },
