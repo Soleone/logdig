@@ -1,0 +1,26 @@
+{
+  "name": "pi-session-journal",
+  "private": true,
+  "description": "A small work journal from Pi sessions, in your Obsidian daily notes.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "bin": {
+    "logdig": "./bin/logdig.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "QUICKSTART.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.js"
+    ]
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
