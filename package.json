@@ -1,7 +1,26 @@
 {
-  "name": "pi-session-journal",
-  "private": true,
-  "description": "A small work journal from Pi sessions, in your Obsidian daily notes.",
+  "name": "logdig",
+  "version": "0.0.0",
+  "description": "Turn saved Pi sessions into a work journal in your Obsidian daily notes.",
+  "license": "MIT",
+  "author": "Soleone",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Soleone/logdig.git"
+  },
+  "homepage": "https://github.com/Soleone/logdig#readme",
+  "bugs": "https://github.com/Soleone/logdig/issues",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "obsidian",
+    "journal",
+    "cli"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.19.0"
@@ -13,7 +32,8 @@
     "bin/",
     "src/",
     "README.md",
-    "QUICKSTART.md"
+    "QUICKSTART.md",
+    "LICENSE"
   ],
   "pi": {
     "extensions": [
@@ -21,6 +41,17 @@
     ]
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "prepublishOnly": "npm test",
+    "release": "release-it",
+    "release:dry-run": "npm test && release-it --dry-run"
+  },
+  "devDependencies": {
+    "release-it": "^20.2.1"
+  },
+  "overrides": {
+    "release-it": {
+      "undici": "^7.30.0"
+    }
   }
 }

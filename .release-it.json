@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "before:init": "npm test"
+  },
+  "git": {
+    "requireBranch": "main",
+    "requireCleanWorkingDir": true,
+    "commitMessage": "chore: release v${version}",
+    "tagName": "v${version}"
+  },
+  "npm": {
+    "publish": true
+  },
+  "github": {
+    "release": false
+  }
+}

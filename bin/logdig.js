@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { collectSessions, parseBackfillArgument, writeSessions } from "../src/session-runner.js";
 import { createPiModelClient } from "../src/pi-client.js";
@@ -11,7 +12,8 @@ import { configureLogDig } from "../src/setup.js";
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const relativeEntry = path.relative(process.cwd(), fileURLToPath(import.meta.url)).split(path.sep).join("/");
 const entryArgument = relativeEntry.startsWith(".") ? relativeEntry : `./${relativeEntry}`;
-const commandName = path.basename(process.argv[1] || "") === "logdig"
+const installedPackage = path.basename(path.dirname(path.resolve(packageRoot))) === "node_modules";
+const commandName = installedPackage || path.basename(process.argv[1] || "") === "logdig"
   ? "logdig"
   : `node ${/\s/.test(entryArgument) ? JSON.stringify(entryArgument) : entryArgument}`;
 
@@ -209,18 +211,19 @@ function helpText() {
   return [
     "LogDig: a little work journal from your Pi sessions.",
     "",
-    "Start here, from this checkout (no install needed):",
-    "  node ./bin/logdig.js init",
-    "  node ./bin/logdig.js doctor",
-    "  node ./bin/logdig.js backfill 1 --dry-run",
+    commandName === "logdig" ? "Start here:" : "Start here, from this checkout (no install needed):",
+    `  ${commandName} init`,
+    `  ${commandName} doctor`,
+    `  ${commandName} backfill 1 --dry-run`,
     "",
-    "Commands (use 'logdig' after npm link):",
+    "Commands (install with 'npm install -g logdig', or use 'npm link' in a checkout):",
     "  logdig init                         guided setup; nothing is summarized",
     "  logdig doctor                       check paths and Pi without a model request",
     "  logdig config                       show settings and active environment overrides",
     "  logdig backfill [N|all] [--dry-run] [--model provider/model|default]",
     "                                      journal saved sessions (default: last 3 days)",
     "  logdig pi-install | pi-uninstall     add or remove /journal integration",
+    "  logdig --version                    show the installed version",
     "",
     "Preview first: --dry-run shows dates, files, and cache hits. It never calls Pi",
     "or writes files. Remove --dry-run when you're ready to summarize.",
@@ -234,7 +237,7 @@ function helpText() {
 
 async function main() {
   const [command = "help", ...args] = process.argv.slice(2);
-  const commands = ["init", "config", "doctor", "backfill", "pi-install", "pi-uninstall", "help", "--help", "-h"];
+  const commands = ["init", "config", "doctor", "backfill", "pi-install", "pi-uninstall", "help", "--help", "-h", "--version", "-v"];
   if (!commands.includes(command)) throw new Error(`Unknown command: ${command}. Run '${commandName} help'.`);
   if (args.includes("--help") || args.includes("-h")) {
     console.log(helpText());
@@ -242,6 +245,12 @@ async function main() {
   }
   if (command !== "backfill" && args.length) throw new Error(`'${command}' does not accept arguments. Run '${commandName} help'.`);
   switch (command) {
+    case "--version":
+    case "-v": {
+      const { version } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+      console.log(version);
+      break;
+    }
     case "init":
       await init();
       break;

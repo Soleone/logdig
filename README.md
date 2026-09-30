@@ -10,13 +10,18 @@ No build step, runtime dependencies, or separate model credentials. Try a safe p
 
 You need **Node.js 22.19+**, Pi installed and signed in, and a daily-notes folder using `YYYY-MM-DD.md` filenames. Custom daily-note filename formats are not supported yet.
 
-From this checkout:
+Install globally to make `logdig` available on your PATH (once the first npm release is published):
 
 ```sh
-node ./bin/logdig.js init
-node ./bin/logdig.js doctor
-node ./bin/logdig.js backfill 1 --dry-run
+npm install -g logdig
+logdig init
+logdig doctor
+logdig backfill 1 --dry-run
 ```
+
+Working from a checkout before the first release? Run `npm link` once, then use the same commands. No build step is needed. You can also run `node ./bin/logdig.js ...` without installing anything.
+
+For a one-off run without a global install, use `npx logdig --help`.
 
 Setup explains the choices, keeps defaults on Enter, and re-asks only the question you mistyped. It shows a review before saving. Declining that review or pressing Ctrl+C leaves your settings unchanged. Setup does not summarize sessions or write daily notes.
 
@@ -35,13 +40,13 @@ For a comfortable first try:
 When the preview looks right:
 
 ```sh
-node ./bin/logdig.js backfill 1
+logdig backfill 1
 ```
 
 This journals sessions whose last user message was **today in your configured timezone**, not a rolling 24-hour window. If today is quiet, preview seven days instead:
 
 ```sh
-node ./bin/logdig.js backfill 7 --dry-run
+logdig backfill 7 --dry-run
 ```
 
 See [QUICKSTART.md](QUICKSTART.md) for the short, copyable walkthrough.
@@ -95,12 +100,13 @@ Missing daily-note and cache folders are created only by a real save. Raw Pi his
 
 ## Commands
 
-All commands work as `node ./bin/logdig.js ...` from the checkout. If you prefer the shorter `logdig` command, run `npm link` once.
+After a global install or `npm link`, use `logdig` from any directory. All commands also work as `node ./bin/logdig.js ...` from the checkout.
 
 ```text
 logdig init                         configure paths, summaries, and optional Pi integration
 logdig doctor                       check paths and Pi, with no model request
 logdig config                       show effective settings and environment overrides
+logdig --version                    show the installed version
 logdig backfill                     journal the last 3 calendar days
 logdig backfill 7 --dry-run          preview seven days without changing anything
 logdig backfill all --dry-run        preview every discoverable saved session
@@ -119,10 +125,10 @@ Run one backfill at a time against a given journal. The extension prevents overl
 
 ## Inside Pi
 
-Install the extension from this checkout if you did not choose it during setup:
+Install the extension if you did not choose it during setup:
 
 ```sh
-node ./bin/logdig.js pi-install
+logdig pi-install
 ```
 
 Restart Pi or run `/reload`. Then, **inside Pi**:
@@ -169,7 +175,34 @@ Set `LOGDIG_CONFIG_PATH` to choose another settings file. Existing `PI_JOURNAL_*
 ## Development
 
 ```sh
+npm ci
 npm test
+npm link
 ```
 
-Tests use temporary directories and local fake model responses, including CLI subprocess tests. They do not use your Pi credentials, call a provider, or write to your actual vault.
+Tests use temporary directories and local fake model responses, including CLI subprocess tests and a packed, globally installed CLI smoke test. They do not use your Pi credentials, call a provider, or write to your actual vault. The package test installs only into a temporary prefix, not your real global npm directory.
+
+`release-it` is a development dependency only. Version 20 supports the same Node.js minimum as LogDig. The `undici` override keeps its pinned HTTP dependency on a patched 7.x version until release-it updates that dependency. Published installations have no runtime dependencies.
+
+## Releases
+
+Releases are interactive and run from a clean, committed `main` checkout with its upstream configured. You need npm publishing access and permission to push to `origin`. No GitHub API token is needed; this workflow creates Git tags, not GitHub release pages.
+
+The starting version is `0.0.0`, so the first minor release becomes `0.1.0`:
+
+```sh
+npm ci
+npm login
+npm run release:dry-run -- minor
+npm run release -- minor
+```
+
+The dry run runs tests and checks npm/Git access, but does not bump versions, commit, tag, push, or publish. The real command runs tests, updates `package.json` and `package-lock.json`, publishes to npm, creates a release commit and `vX.Y.Z` tag, and pushes the commit/tag. Follow npm's authentication or two-factor prompts if requested. Future releases can use `npm run release -- patch` or choose the version interactively with `npm run release`.
+
+`prepublishOnly` also runs the tests before a direct `npm publish`. Use `npm pack --dry-run` to inspect the published files: CLI, source, docs, manifest, and license only.
+
+After a release, update a global installation with `npm install -g logdig@latest`. Uninstall with `npm uninstall -g logdig`; this does not remove settings or notes. If you installed the Pi extension, run `logdig pi-uninstall` before uninstalling the CLI.
+
+## License
+
+[MIT](LICENSE).

@@ -2,15 +2,16 @@
 
 A small work journal in your existing Obsidian daily notes. Start manually, with one day, and keep automatic capture off until the results feel useful.
 
-## 1. Configure
+## 1. Install and configure
 
-From this project folder, with Node.js 22.19+ and Pi installed:
+With Node.js 22.19+ and Pi installed (once the first npm release is published):
 
 ```sh
-node ./bin/logdig.js init
+npm install -g logdig
+logdig init
 ```
 
-No `npm install`, build step, or global install is needed.
+Before the first release, run `npm link` from this project folder instead. No build step is needed. To work directly from the checkout without installing, replace `logdig` below with `node ./bin/logdig.js`.
 
 In the wizard:
 
@@ -27,8 +28,8 @@ Press Enter to accept defaults. A typo only re-asks that question. Review the ch
 ## 2. Check and preview
 
 ```sh
-node ./bin/logdig.js doctor
-node ./bin/logdig.js backfill 1 --dry-run
+logdig doctor
+logdig backfill 1 --dry-run
 ```
 
 The preview shows projects, dates, destination files, cache hits, and which sessions need summarizing. **No model requests, file changes, or new folders.** It does not display transcript excerpts.
@@ -36,7 +37,7 @@ The preview shows projects, dates, destination files, cache hits, and which sess
 `1` means today in your chosen timezone. If nothing happened today:
 
 ```sh
-node ./bin/logdig.js backfill 7 --dry-run
+logdig backfill 7 --dry-run
 ```
 
 If no history is found at all, start a saved Pi session or select the right history folder in the wizard's advanced settings.
@@ -46,7 +47,7 @@ If no history is found at all, start a saved Pi session or select the right hist
 Once the preview looks right, run the same range without `--dry-run`:
 
 ```sh
-node ./bin/logdig.js backfill 1
+logdig backfill 1
 ```
 
 This may send selected, redacted history to your Pi model and incur provider charges. Pi uses its existing authentication. If authentication fails, open Pi, run `/login`, then retry. Common secrets are redacted, but redaction is not a complete secret scanner.
@@ -58,7 +59,7 @@ Repeating an unchanged session reuses its summary and does not insert that entry
 ## Optional: use `/journal` inside Pi
 
 ```sh
-node ./bin/logdig.js pi-install
+logdig pi-install
 ```
 
 Restart Pi or run `/reload`. Then, inside Pi:
@@ -70,12 +71,13 @@ Restart Pi or run `/reload`. Then, inside Pi:
 
 The first command previews today. The second journals the current session using your active Pi model, unless you configured an override. Automatic capture remains off unless you enable it.
 
-## Optional: shorter shell commands
+## Updating
+
+After a new npm release:
 
 ```sh
-npm link
-logdig doctor
-logdig backfill 1 --dry-run
+npm install -g logdig@latest
+logdig --version
 ```
 
 For more commands, privacy details, and troubleshooting, see [README.md](README.md).
