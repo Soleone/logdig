@@ -77,13 +77,19 @@ A short summary.
 **[[<another-entry-id>|21:19]]**
 
 More work on the same project.
+
+## another-project
+
+**[[<single-entry-id>|23:13]]**: One entry stays compact.
 ```
+
+A project with one entry puts the timestamp inline at the start of its summary. When a second entry arrives, both timestamps move to separate lines. Summary wording is preserved, including any edits you made.
 
 Obsidian displays each link as just the timestamp; clicking it opens that entry's detailed summary. Keep the summary cache inside your vault so Obsidian can resolve these links. Daily summaries do not create headings or code fences; structured detail stays in the linked note. Custom section headings are supported, with project subheadings one level deeper (or bold project labels beneath a level-six heading).
 
 The **last user message** supplies the date and time, even if the assistant finishes after midnight. Alternate session branches are included as explorations, not assumed to be the final result.
 
-Unchanged sessions reuse their summaries. The identifier in each timestamp link prevents duplicate entries, without HTML comments. Older project-name links and comment-wrapped entries are still recognized. Changing the default does not override existing saved heading preferences; rerun setup to change them. Changing the session, timezone, explicit model, summary level, or heading can append a **new version** rather than replace an earlier journal entry. Linked entry notes keep their original summary even when the latest session cache changes. Existing journal text is not edited, and headings inside frontmatter or fenced code are not insertion targets.
+Unchanged sessions reuse their summaries. The identifier in each timestamp link prevents duplicate entries, without HTML comments. Older project-name links and comment-wrapped entries are still recognized. Changing the default does not override existing saved heading preferences; rerun setup to change them. Changing the session, timezone, explicit model, summary level, or heading can append a **new version** rather than replace an earlier journal entry. Linked entry notes keep their original summary even when the latest session cache changes. Handwritten content and summary wording are preserved; an inline timestamp can be expanded when its project gains another entry. Headings inside frontmatter or fenced code are not insertion targets.
 
 Missing daily-note and cache folders are created only by a real save. Raw Pi history stays in Pi's storage.
 

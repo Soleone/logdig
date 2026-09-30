@@ -19,6 +19,44 @@ async function workspace(t) {
   return { daily, entry, dailyPath: path.join(daily, `${date}.md`) };
 }
 
+test("a singleton puts its timestamp inline and repeat saves leave the note unchanged", async (t) => {
+  const { daily, entry, dailyPath } = await workspace(t);
+  const summary = "First paragraph.\n\nSecond paragraph stays separate.";
+  const version = { ...entry, summary };
+  await appendDailyEntry(daily, "# Projects", version);
+  const text = await readFile(dailyPath, "utf8");
+  assert.match(text, /^# Projects\n\n## alpha\n\n\*\*\[\[[a-f0-9]{64}\|11:00\]\]\*\*: First paragraph\.\n\nSecond paragraph stays separate\.\n$/);
+  assert.equal((await inspectDailyEntry(daily, "# Projects", version)).appended, false);
+  assert.equal((await appendDailyEntry(daily, "# Projects", version)).appended, false);
+  assert.equal(await readFile(dailyPath, "utf8"), text);
+});
+
+test("adding a second entry expands the existing singleton without changing its edited summary or neighbors", async (t) => {
+  for (const time of ["09:00", "12:00"]) {
+    const { daily, entry, dailyPath } = await workspace(t);
+    const personal = "# Log\n\nMy personal log.\n\n";
+    const tasks = "# Tasks\n\nKeep my tasks.\n";
+    await writeFile(dailyPath, `${personal}# Projects\n\n${tasks}`);
+    await appendDailyEntry(daily, "# Projects", { ...entry, summary: "Original paragraph.\n\nSecond paragraph." });
+    await appendDailyEntry(daily, "# Projects", { ...entry, sessionId: "beta", project: "beta", time: "15:00", summary: "Beta summary." });
+    const first = await readFile(dailyPath, "utf8");
+    const beta = first.slice(first.indexOf("## beta"));
+    await writeFile(dailyPath, first.replace("Original paragraph.", "Human-edited paragraph."));
+    await appendDailyEntry(daily, "# Projects", { ...entry, sessionId: "second", time, summary: "New alpha summary." });
+    const updated = await readFile(dailyPath, "utf8");
+    assert.ok(updated.startsWith(personal));
+    assert.equal(updated.slice(updated.indexOf("## beta")), beta);
+    const alpha = updated.slice(updated.indexOf("## alpha"), updated.indexOf("## beta"));
+    assert.equal((alpha.match(/^\*\*\[\[[a-f0-9]{64}\|\d{2}:\d{2}\]\]\*\*$/gm) || []).length, 2);
+    assert.ok(!/^\*\*\[\[.*\]\]\*\*: /m.test(alpha));
+    assert.ok(alpha.includes("|11:00]]**\n\nHuman-edited paragraph.\n\nSecond paragraph."));
+    const times = [...alpha.matchAll(/\[\[[a-f0-9]{64}\|(\d{2}:\d{2})\]\]/g)].map((match) => match[1]);
+    assert.deepEqual(times, ["11:00", time].sort());
+    assert.equal((await inspectDailyEntry(daily, "# Projects", entry)).appended, false);
+    assert.equal((await inspectDailyEntry(daily, "# Projects", { ...entry, sessionId: "second", time })).appended, false);
+  }
+});
+
 test("try directories for the same project share a cleanly named group", async (t) => {
   const { daily, entry, dailyPath } = await workspace(t);
   const settings = { cacheDirectory: path.dirname(path.dirname(entry.sessionPath)), dailyDirectory: daily, dailyHeader: "# Projects", dailySummary: "small", timeZone: "UTC" };

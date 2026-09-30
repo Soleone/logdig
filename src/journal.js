@@ -268,12 +268,17 @@ function addEntryAt(markdown, offset, entry) {
   return `${before}${separator}${entry}${suffix}${after}`;
 }
 
+function timestampEntry(line) {
+  const match = line.match(/^(\*\*\[\[([a-f0-9]{64})\|(\d{2}:\d{2})\]\]\*\*)(?:: (.*)|\s*)$/);
+  return match && { header: match[1], id: match[2], time: match[3], inline: match[4] !== undefined };
+}
+
 function appendUnderProject(markdown, heading, entry) {
   const targetLevel = headingLevel(heading);
   const project = entry.project.replace(/[\\`*_[\]<>|&#\r\n]/g, (character) =>
     /[\r\n]/.test(character) ? " " : `&#${character.charCodeAt(0)};`);
   const projectHeading = targetLevel < 6 ? `${"#".repeat(targetLevel + 1)} ${project}` : `**Project: ${project}**`;
-  const text = dailyEntryText(entry, heading);
+  const projectEntries = [];
   let lineStart = 0;
   let sectionStart = -1;
   let sectionEnd = markdown.length;
@@ -316,9 +321,12 @@ function appendUnderProject(markdown, heading, entry) {
           const isProjectHeading = targetLevel < 6 ? level === targetLevel + 1 : /^\*\*Project: .+\*\*$/.test(line);
           if (projectStart !== -1 && projectEnd === undefined && isProjectHeading) projectEnd = lineStart;
           if (projectStart === -1 && line.trimEnd() === projectHeading) projectStart = lineStart;
-          if (projectStart !== -1 && projectEnd === undefined && nextTimestamp === undefined) {
-            const timestamp = line.match(/^\*\*\[\[[a-f0-9]{64}\|(\d{2}:\d{2})\]\]\*\*$/)?.[1];
-            if (timestamp && timestamp > entry.time) nextTimestamp = lineStart;
+          if (projectStart !== -1 && projectEnd === undefined) {
+            const timestamp = timestampEntry(line);
+            if (timestamp) {
+              projectEntries.push({ ...timestamp, start: lineStart });
+              if (nextTimestamp === undefined && timestamp.time > entry.time) nextTimestamp = lineStart;
+            }
           }
         }
       }
@@ -328,12 +336,19 @@ function appendUnderProject(markdown, heading, entry) {
     lineStart = newline + 1;
   }
 
+  const text = dailyEntryText(entry, heading, projectEntries.length === 0);
   if (sectionStart === -1) {
     const separator = !markdown ? "" : markdown.endsWith("\n\n") ? "" : markdown.endsWith("\n") ? "\n" : "\n\n";
     return `${markdown}${separator}${heading}\n\n${projectHeading}\n\n${text}\n`;
   }
 
   if (projectStart === -1) return addEntryAt(markdown, sectionEnd, `${projectHeading}\n\n${text}`);
+  for (const timestamp of projectEntries) {
+    if (!timestamp.inline) continue;
+    const separator = timestamp.start + timestamp.header.length;
+    // Both separators are two characters, so recorded insertion offsets remain valid.
+    markdown = `${markdown.slice(0, separator)}\n\n${markdown.slice(separator + 2)}`;
+  }
   return addEntryAt(markdown, nextTimestamp ?? projectEnd ?? sectionEnd, text);
 }
 
@@ -341,13 +356,14 @@ export function dailyEntryId(entry, heading) {
   return hashValue([entry.sessionId, entry.cacheFingerprint, entry.summaryLevel, heading]);
 }
 
-function dailyEntryText(entry, heading) {
+function dailyEntryText(entry, heading, inline) {
   const id = dailyEntryId(entry, heading);
   // Daily notes stay section-safe; structured headings and code live in the linked note.
   const summary = entry.summary.split(/\r?\n/)
     .map((line) => /^ {0,3}(`{3,}|~{3,})/.test(line) ? "" : line.replace(/^( {0,3})(#{1,6})(?=\s)/, "$1\\$2"))
     .join("\n").trim();
-  return [`**[[${id}|${entry.time}]]**`, "", summary].join("\n");
+  const timestamp = `**[[${id}|${entry.time}]]**`;
+  return inline ? `${timestamp}: ${summary}` : `${timestamp}\n\n${summary}`;
 }
 
 export async function inspectDailyEntry(dailyDirectory, heading, entry) {
@@ -356,8 +372,8 @@ export async function inspectDailyEntry(dailyDirectory, heading, entry) {
   const existing = await readMarkdownIfPresent(dailyPath) || "";
   const id = dailyEntryId(entry, heading);
   const present = existing.includes(`<!-- logdig:${id}:start -->`) ||
-    existing.split(/\r?\n/).some((line) => line.startsWith("**") &&
-      (line.startsWith(`**[[${id}|`) || line.includes(` · [[${id}|`)) && line.endsWith("]]**"));
+    existing.split(/\r?\n/).some((line) => timestampEntry(line)?.id === id ||
+      (line.startsWith("**") && line.includes(` · [[${id}|`) && line.endsWith("]]**")));
   return { dailyPath, existing, appended: !present };
 }
 
