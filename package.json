@@ -1,6 +1,6 @@
 {
   "name": "logdig",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Turn saved Pi sessions into a work journal in your Obsidian daily notes.",
   "license": "MIT",
   "author": "Soleone",
