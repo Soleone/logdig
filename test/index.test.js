@@ -93,7 +93,9 @@ test("journal command appends the chosen layer under the configured header at th
       hasConfiguredAuth: () => true,
       complete: async () => {
         modelCalls++;
-        return { stopReason: "stop", content: [{ type: "text", text: JSON.stringify(layers) }] };
+        return { stopReason: "stop", content: [{ type: "text", text: JSON.stringify(layers) }], usage: {
+          input: 70, output: 10, cacheRead: 300, cacheWrite: 0, cost: { total: 0.03 },
+        } };
       },
     },
   };
@@ -110,6 +112,9 @@ test("journal command appends the chosen layer under the configured header at th
     assert.ok(daily.includes("- **Goal:** Finish the task."));
     assert.ok(!daily.includes("Short layer should not be inserted."));
     assert.ok(!daily.includes("Long layer should remain cached"));
+    const id = daily.match(/\[\[([a-f0-9]{64})\|00:01\]\]/)[1];
+    const detailed = await readFile(path.join(cacheDirectory, "Entries", `${id}.md`), "utf8");
+    assert.match(detailed, /^logUsage: "\$0\.03 ⚡300 ↑70 ↓10 · \d+s"$/m);
 
     await command("", ctx);
     assert.equal(modelCalls, 1);

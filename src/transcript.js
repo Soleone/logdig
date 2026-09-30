@@ -79,6 +79,48 @@ function timestampOf(entry) {
   return undefined;
 }
 
+export function sessionMetrics(session) {
+  const metrics = {};
+  const fields = ["input", "output", "cacheRead", "cacheWrite"];
+  const totals = Object.fromEntries(fields.map((field) => [field, 0]));
+  let cost = 0;
+  let hasCost = false;
+  const recorded = new Set();
+  const started = timestampOf(session.header);
+  let first = started;
+  let last = started;
+
+  for (const entry of session.entries || []) {
+    const time = timestampOf(entry);
+    if (time !== undefined) {
+      first = Math.min(first ?? time, time);
+      last = Math.max(last ?? time, time);
+    }
+    const usage = entry.type === "usage" || entry.type === "compaction" || entry.type === "branch_summary"
+      ? entry.usage
+      : entry.type === "message" && ["assistant", "toolResult"].includes(entry.message?.role) ? entry.message.usage : undefined;
+    if (!usage || typeof usage !== "object") continue;
+    for (const field of fields) {
+      if (!Number.isFinite(usage[field]) || usage[field] < 0) continue;
+      totals[field] += usage[field];
+      recorded.add(field);
+    }
+    if (Number.isFinite(usage.cost?.total) && usage.cost.total >= 0) {
+      cost += usage.cost.total;
+      hasCost = true;
+    }
+  }
+
+  if (first !== undefined) metrics.startedAt = new Date(first).toISOString();
+  if (last !== undefined) metrics.endedAt = new Date(last).toISOString();
+  if (first !== undefined && last !== undefined) metrics.durationSeconds = Math.round((last - first) / 1000);
+  if (hasCost) metrics.costUsd = Number(cost.toFixed(6));
+  for (const [field, key] of [["cacheRead", "cacheReadTokens"], ["input", "inputTokens"], ["output", "outputTokens"], ["cacheWrite", "cacheWriteTokens"]]) {
+    if (recorded.has(field)) metrics[key] = totals[field];
+  }
+  return metrics;
+}
+
 function localParts(timestamp, timeZone) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,

@@ -54,6 +54,41 @@ test("timestamp links open immutable three-layer snapshots as a session changes"
   assert.equal((await readdir(path.join(cache, "Entries"))).length, 2);
 });
 
+test("reusing legacy cache adds usage to existing snapshots without model calls or journal edits", async (t) => {
+  const { daily, cache } = await workspace(t);
+  const settings = { cacheDirectory: cache, dailyDirectory: daily, dailyHeader: "# Projects", dailySummary: "small", timeZone: "UTC" };
+  const session = { header: { id: "old-cache", cwd: "/work/demo", timestamp: "2026-09-28T08:00:00Z" }, entries: [
+    { type: "message", timestamp: "2026-09-28T09:00:00Z", message: { role: "user", content: "Record this." } },
+    { type: "message", timestamp: "2026-09-28T09:01:00Z", message: { role: "assistant", content: "Done.", usage: {
+      input: 12, output: 4, cacheRead: 70, cacheWrite: 3, cost: { total: 0.1 },
+    } } },
+  ] };
+  let calls = 0;
+  const model = { complete: async () => { calls++; return JSON.stringify({ small: "Done.", medium: "Details.", large: "Timeline." }); } };
+  assert.deepEqual((await writeSessions(model, [session], settings)).errors, []);
+  const dailyPath = path.join(daily, "2026-09-28.md");
+  const dailyText = await readFile(dailyPath, "utf8");
+  const id = dailyText.match(/\[\[([a-f0-9]{64})\|09:00\]\]/)[1];
+  const snapshotPath = path.join(cache, "Entries", `${id}.md`);
+  const cachePath = path.join(cache, "Sessions", "old-cache.md");
+  const withoutMetrics = (text) => text.replace(/^sessionUsage: .*\n/gm, "");
+  await writeFile(cachePath, withoutMetrics(await readFile(cachePath, "utf8")));
+  await writeFile(snapshotPath, withoutMetrics(await readFile(snapshotPath, "utf8")));
+  const preview = await writeSessions(model, [session], settings, { dryRun: true });
+  assert.equal(preview.entriesSkipped, 1);
+  assert.equal(parseSessionNote(await readFile(snapshotPath, "utf8")).sessionUsage, undefined);
+  const result = await writeSessions(model, [session], settings);
+  assert.equal(result.entriesSkipped, 1);
+  assert.equal(result.summariesReused, 1);
+  assert.equal(calls, 1);
+  assert.equal(await readFile(dailyPath, "utf8"), dailyText);
+  for (const file of [cachePath, snapshotPath]) {
+    const note = parseSessionNote(await readFile(file, "utf8"));
+    assert.equal(note.sessionUsage, "$0.10 ⚡70 ↑12 ↓4 · 1h 1m");
+    assert.equal(typeof note.logUsage, "string");
+  }
+});
+
 test("older project-name links still deduplicate without rewriting the entry", async (t) => {
   const { daily, entry } = await workspace(t);
   await mkdir(daily);

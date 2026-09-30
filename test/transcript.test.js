@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { eventsForSession, redactAndClip, sessionFromJsonl } from "../src/transcript.js";
+import { eventsForSession, redactAndClip, sessionFromJsonl, sessionMetrics } from "../src/transcript.js";
 
 function message(id, parentId, timestamp, role, content, extra = {}) {
   return {
@@ -30,6 +30,33 @@ test("legacy linear sessions without entry IDs keep their ordered history", () =
     { type: "message", timestamp: "2026-09-27T12:01:00.000Z", message: { role: "assistant", content: "second" } },
   ].map((record) => JSON.stringify(record)).join("\n");
   assert.equal(sessionFromJsonl(source).entries.length, 2);
+});
+
+test("session metrics aggregate billed usage across all recorded entry types without double-counting", () => {
+  const usage = (input, output, cacheRead, cacheWrite, cost) => ({ input, output, cacheRead, cacheWrite, cost: { total: cost } });
+  const session = {
+    header: { timestamp: "2026-09-28T09:00:00Z" },
+    entries: [
+      { type: "message", timestamp: "2026-09-28T09:01:00Z", message: { role: "assistant", usage: usage(100, 20, 400, 5, 0.25) } },
+      { type: "message", timestamp: "2026-09-28T09:02:00Z", message: { role: "toolResult", usage: usage(30, 10, 100, 0, 0.125) } },
+      { type: "usage", timestamp: "2026-09-28T09:03:00Z", kind: "future-kind", usage: usage(4, 1, 40, 0, 0.01) },
+      { type: "compaction", timestamp: "2026-09-28T09:04:00Z", usage: usage(2, 8, 60, 0, 0.015) },
+      { type: "branch_summary", timestamp: "2026-09-28T09:05:00Z", usage: usage(1, 5, 20, 0, 0.02) },
+      { type: "message", timestamp: "2026-09-28T09:06:00Z", message: { role: "user", usage: usage(999, 999, 999, 999, 99) } },
+    ],
+  };
+  assert.deepEqual(sessionMetrics(session), {
+    startedAt: "2026-09-28T09:00:00.000Z", endedAt: "2026-09-28T09:06:00.000Z", durationSeconds: 360,
+    costUsd: 0.42, cacheReadTokens: 620, inputTokens: 137, outputTokens: 44, cacheWriteTokens: 5,
+  });
+});
+
+test("unknown or malformed usage is omitted rather than displayed as zero", () => {
+  assert.deepEqual(sessionMetrics({ header: {}, entries: [] }), {});
+  assert.deepEqual(sessionMetrics({
+    header: { timestamp: "2026-09-28T09:00:00Z" },
+    entries: [{ type: "message", timestamp: "2026-09-28T09:00:30Z", message: { role: "assistant", usage: { input: NaN, cost: { total: -1 } } } }],
+  }), { startedAt: "2026-09-28T09:00:00.000Z", endedAt: "2026-09-28T09:00:30.000Z", durationSeconds: 30 });
 });
 
 test("session event extraction groups by local date and keeps evidence, not thinking", () => {

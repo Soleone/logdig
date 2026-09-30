@@ -98,6 +98,17 @@ test("interleaved projects form one group each and older backfills sort within t
   assert.ok(!text.includes("<!-- logdig:"));
 });
 
+test("entry and next project heading have exactly one blank line even after older excess spacing", async (t) => {
+  const { daily, entry, dailyPath } = await workspace(t);
+  await appendDailyEntry(daily, "# Projects", entry);
+  const first = await readFile(dailyPath, "utf8");
+  await writeFile(dailyPath, first + "\n\n\n");
+  await appendDailyEntry(daily, "# Projects", { ...entry, sessionId: "two", project: "beta", time: "12:00" });
+  const updated = await readFile(dailyPath, "utf8");
+  assert.match(updated, /Made progress\.\n\n## beta\n\n\*\*\[\[[a-f0-9]{64}\|12:00\]\]\*\*: Made progress\./);
+  assert.doesNotMatch(updated, /\n{3,}## beta/);
+});
+
 test("group discovery ignores frontmatter, code examples, and other sections", async (t) => {
   const { daily, entry, dailyPath } = await workspace(t);
   const prefix = "---\nexample: |\n# Projects\n## alpha\n---\n\n# Log\n\n```md\n# Projects\n## alpha\n```\n\n";

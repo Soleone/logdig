@@ -13,7 +13,7 @@ function appendTail(current, chunk, limit) {
 
 function piArguments(settings) {
   const args = [
-    "--print",
+    "--mode", "json",
     "--no-session",
     "--no-tools",
     "--no-extensions",
@@ -35,9 +35,14 @@ function runPiPrompt(prompt, settings, spawnProcess) {
       env: process.env,
       stdio: ["pipe", "pipe", "pipe"],
     }, { spawnProcess });
-    let stdout = "";
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let outputLength = 0;
     let stderr = "";
     let settled = false;
+    let agentSettled = false;
+    let finalMessage;
+    const usages = [];
 
     const finish = (error, result) => {
       if (settled) return;
@@ -53,10 +58,32 @@ function runPiPrompt(prompt, settings, spawnProcess) {
     }, MODEL_TIMEOUT_MS);
 
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
-      if (stdout.length > MAX_STDOUT) {
+      outputLength += chunk.length;
+      if (outputLength > MAX_STDOUT) {
         child.kill("SIGTERM");
         finish(new Error("Pi summarization output exceeded the size limit"));
+        return;
+      }
+      buffer += decoder.decode(chunk, { stream: true });
+      let newline;
+      while ((newline = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newline).replace(/\r$/, "");
+        buffer = buffer.slice(newline + 1);
+        if (!line) continue;
+        let event;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          child.kill("SIGTERM");
+          finish(new Error("Pi summarization returned invalid JSON events"));
+          return;
+        }
+        if (event.type === "message_end" && event.message?.role === "assistant") {
+          finalMessage = event.message;
+          if (event.message.usage) usages.push(event.message.usage);
+        }
+        if (event.type === "compaction_end" && event.result?.usage) usages.push(event.result.usage);
+        if (event.type === "agent_settled") agentSettled = true;
       }
     });
     child.stderr.on("data", (chunk) => {
@@ -66,9 +93,23 @@ function runPiPrompt(prompt, settings, spawnProcess) {
       finish(new Error(`Could not start Pi at '${settings.piCommand || "pi"}': ${error.message}`));
     });
     child.once("close", (code, signal) => {
-      if (code === 0) return finish(undefined, stdout.trim());
-      const detail = stderr.trim();
-      finish(new Error(`Pi summarization failed${signal ? ` (${signal})` : ` with exit code ${code}`}${detail ? `: ${detail}` : ""}`));
+      if (settled) return;
+      buffer += decoder.decode();
+      if (code !== 0) {
+        const detail = stderr.trim();
+        finish(new Error(`Pi summarization failed${signal ? ` (${signal})` : ` with exit code ${code}`}${detail ? `: ${detail}` : ""}`));
+        return;
+      }
+      if (!agentSettled || !finalMessage || buffer.trim()) {
+        finish(new Error("Pi summarization returned incomplete JSON events"));
+        return;
+      }
+      if (["error", "aborted"].includes(finalMessage.stopReason)) {
+        finish(new Error(finalMessage.errorMessage || `Pi summarization ${finalMessage.stopReason}`));
+        return;
+      }
+      const text = (finalMessage.content || []).filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
+      finish(undefined, { text, usages });
     });
     child.stdin.once("error", (error) => {
       if (error.code !== "EPIPE") finish(error);

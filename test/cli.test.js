@@ -30,7 +30,15 @@ else {
   if (process.env.LOGDIG_TEST_MODEL_ERROR) {
     console.error("No authentication configured; open Pi and run /login");
     process.exitCode = 1;
-  } else console.log(JSON.stringify({ small: "Improved the demo and verified its tests.", medium: "## Goal\\nImprove the demo.\\n\\n## Status\\nTests passed.", large: "Reviewed the demo, made the change, and ran its tests." }));
+  } else {
+    const text = JSON.stringify({ small: "Improved the demo and verified its tests.", medium: "## Goal\\nImprove the demo.\\n\\n## Status\\nTests passed.", large: "Reviewed the demo, made the change, and ran its tests." });
+    const usage = { input: 120, output: 30, cacheRead: 450, cacheWrite: 0, cost: { total: 0.025 } };
+    for (const event of [
+      { type: "session", id: "fake-run" },
+      { type: "message_end", message: { role: "assistant", content: [{ type: "text", text }], usage, stopReason: "stop" } },
+      { type: "agent_settled" },
+    ]) console.log(JSON.stringify(event));
+  }
 }
 `, { mode: 0o755 });
   let piCommand = fakeScript;
@@ -241,6 +249,7 @@ test("real CLI backfill preserves handwritten notes, gives progress, and repeats
   const snapshot = await readFile(path.join(w.settings.cacheDirectory, "Entries", `${entryId}.md`), "utf8");
   const cache = await readFile(path.join(w.settings.cacheDirectory, "Sessions", "demo-session.md"), "utf8");
   for (const heading of ["# Small", "# Medium", "# Large"]) assert.ok(cache.includes(heading));
+  assert.match(cache, /^logUsage: "\$0\.03 ⚡450 ↑120 ↓30 · \d+s"$/m);
   assert.equal(snapshot, cache);
   const second = await runCli(["backfill", "1"], w.env);
   assert.equal(second.code, 0, second.stderr);

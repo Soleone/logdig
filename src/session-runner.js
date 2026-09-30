@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { appendDailyEntry, inspectDailyEntry, inspectSessionSummary, saveSessionSummary } from "./journal.js";
-import { eventsForSession, fingerprintSession, sessionFromJsonl } from "./transcript.js";
+import { eventsForSession, fingerprintSession, sessionFromJsonl, sessionMetrics } from "./transcript.js";
 
 function localDate(timestamp, timeZone) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -144,6 +144,8 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
         sessionId: journalSession.header.id,
         cacheFingerprint: cached.cacheFingerprint,
         sessionPath: cached.sessionPath,
+        sourceFingerprint: journalSession.sourceFingerprint,
+        metrics: sessionMetrics(journalSession),
         summaryLevel: settings.dailySummary,
         summary: cached.summary?.[settings.dailySummary],
       };

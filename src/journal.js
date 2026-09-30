@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { sessionMetrics } from "./transcript.js";
 
 const CHUNK_LIMIT = 16000;
 const SUMMARY_VERSION = "session-layers-v2";
@@ -46,10 +47,12 @@ function validateLayers(value) {
   };
 }
 
-async function completeJson(modelClient, prompt) {
+async function completeJson(modelClient, prompt, onUsage) {
   const response = await modelClient.complete(prompt);
-  const text = typeof response === "string" ? response : textFromResponse(response);
-  return parseJsonResponse(text);
+  const text = typeof response === "string" ? response : typeof response.text === "string" ? response.text : textFromResponse(response);
+  const parsed = parseJsonResponse(text);
+  for (const usage of response?.usages || (response?.usage ? [response.usage] : [])) onUsage?.(usage);
+  return parsed;
 }
 
 function eventLine(event) {
@@ -104,20 +107,20 @@ function validateTimeline(value) {
   return value.timeline.trim();
 }
 
-export async function summarizeSession(modelClient, session) {
+export async function summarizeSession(modelClient, session, onUsage) {
   const lines = session.events.map(eventLine);
   const chunks = splitLines(lines);
   if (chunks.length <= 1) {
-    return validateLayers(await completeJson(modelClient, sessionLayersPrompt(session, session.events)));
+    return validateLayers(await completeJson(modelClient, sessionLayersPrompt(session, session.events), onUsage));
   }
 
   const timelines = [];
   for (const chunk of chunks) {
-    timelines.push(validateTimeline(await completeJson(modelClient, timelinePrompt(session.project, chunk))));
+    timelines.push(validateTimeline(await completeJson(modelClient, timelinePrompt(session.project, chunk), onUsage)));
   }
 
   const compactEvents = timelines.map((timeline, index) => ({ chunk: index + 1, timeline }));
-  return validateLayers(await completeJson(modelClient, sessionLayersPrompt(session, compactEvents)));
+  return validateLayers(await completeJson(modelClient, sessionLayersPrompt(session, compactEvents), onUsage));
 }
 
 function frontmatterValue(value) {
@@ -184,7 +187,50 @@ export function parseSessionNote(markdown) {
   return { ...metadata, summary };
 }
 
-export function renderSessionNote(session, summary, cacheFingerprint, model) {
+const LEGACY_METRIC_FIELDS = "startedAt|endedAt|durationSeconds|costUsd|cacheReadTokens|inputTokens|outputTokens|cacheWriteTokens";
+const LEGACY_METRIC_LINE = new RegExp(`^(?:${LEGACY_METRIC_FIELDS}): .*\\n`, "gm");
+
+function compactNumber(value) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (value >= 10_000) return `${Math.round(value / 1_000)}k`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
+  return String(value);
+}
+
+export function formatUsage(metrics) {
+  const parts = [];
+  if (Number.isFinite(metrics.costUsd)) {
+    const cost = metrics.costUsd;
+    const decimals = cost > 0 && cost < 0.0001 ? 6 : cost > 0 && cost < 0.01 ? 4 : 2;
+    parts.push(`$${cost.toFixed(decimals)}`);
+  }
+  for (const [key, icon] of [["cacheReadTokens", "⚡"], ["inputTokens", "↑"], ["outputTokens", "↓"]]) {
+    if (Number.isFinite(metrics[key]) && metrics[key] > 0) parts.push(`${icon}${compactNumber(metrics[key])}`);
+  }
+  if (Number.isFinite(metrics.durationSeconds)) {
+    const seconds = metrics.durationSeconds;
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainder = seconds % 60;
+    parts.push(`· ${hours ? `${hours}h ${minutes}m` : minutes ? `${minutes}m ${remainder}s` : `${remainder}s`}`);
+  }
+  return parts.join(" ");
+}
+
+export function enrichSessionNote(markdown, sourceFingerprint, metrics) {
+  const note = parseSessionNote(markdown);
+  if (!note || note.sourceFingerprint !== sourceFingerprint) return markdown;
+  const closing = markdown.match(/^---\n[\s\S]*?\n---\n/);
+  let header = closing[0].slice(0, -4).replace(LEGACY_METRIC_LINE, "");
+  const usage = note.sessionUsage || formatUsage({ ...note, ...metrics });
+  if (usage && !note.sessionUsage) header += `sessionUsage: ${JSON.stringify(usage)}\n`;
+  const updated = `${header}${markdown.slice(closing[0].length - 4)}`;
+  return updated;
+}
+
+export function renderSessionNote(session, summary, cacheFingerprint, model, logMetrics) {
+  const sessionUsage = formatUsage(sessionMetrics(session));
+  const logUsage = logMetrics && formatUsage(logMetrics);
   return [
     "---",
     'type: "pi-session-journal"',
@@ -198,6 +244,8 @@ export function renderSessionNote(session, summary, cacheFingerprint, model) {
     `cacheFingerprint: ${frontmatterValue(cacheFingerprint)}`,
     `summaryVersion: ${frontmatterValue(SUMMARY_VERSION)}`,
     `model: ${frontmatterValue(model)}`,
+    ...(sessionUsage ? [`sessionUsage: ${JSON.stringify(sessionUsage)}`] : []),
+    ...(logUsage ? [`logUsage: ${JSON.stringify(logUsage)}`] : []),
     "---",
     "",
     "# Small",
@@ -245,12 +293,21 @@ export async function inspectSessionSummary(modelClient, cacheDirectory, session
 
 export async function saveSessionSummary(modelClient, cacheDirectory, session, { onGenerate } = {}) {
   const cached = await inspectSessionSummary(modelClient, cacheDirectory, session);
-  if (cached.reused) return cached;
+  if (cached.reused) {
+    const markdown = await readFile(cached.sessionPath, "utf8");
+    const enriched = enrichSessionNote(markdown, session.sourceFingerprint, sessionMetrics(session));
+    if (enriched !== markdown) await writeAtomically(cached.sessionPath, enriched);
+    return cached;
+  }
 
   onGenerate?.();
   const { sessionPath, cacheFingerprint } = cached;
-  const summary = await summarizeSession(modelClient, session);
-  const markdown = renderSessionNote(session, summary, cacheFingerprint, modelClient.modelLabel || "Pi default");
+  const usages = [];
+  const started = Date.now();
+  const summary = await summarizeSession(modelClient, session, (usage) => usages.push(usage));
+  const logMetrics = sessionMetrics({ header: {}, entries: usages.map((usage) => ({ type: "usage", usage })) });
+  logMetrics.durationSeconds = Math.round((Date.now() - started) / 1000);
+  const markdown = renderSessionNote(session, summary, cacheFingerprint, modelClient.modelLabel || "Pi default", logMetrics);
   await writeAtomically(sessionPath, markdown);
   return { sessionPath, summary, cacheFingerprint, reused: false };
 }
@@ -261,7 +318,7 @@ function headingLevel(line) {
 }
 
 function addEntryAt(markdown, offset, entry) {
-  const before = markdown.slice(0, offset);
+  const before = markdown.slice(0, offset).replace(/\n{3,}$/, "\n\n");
   const after = markdown.slice(offset);
   const separator = before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
   const suffix = after ? "\n\n" : "\n";
@@ -379,9 +436,18 @@ export async function inspectDailyEntry(dailyDirectory, heading, entry) {
 
 export async function appendDailyEntry(dailyDirectory, heading, entry) {
   const { dailyPath, existing, appended } = await inspectDailyEntry(dailyDirectory, heading, entry);
-  if (!appended) return { dailyPath, appended: false };
-
   const entryPath = path.join(path.dirname(entry.sessionPath), "..", "Entries", `${dailyEntryId(entry, heading)}.md`);
+  if (!appended) {
+    if (entry.metrics) {
+      const snapshot = await readMarkdownIfPresent(entryPath);
+      if (snapshot) {
+        const enriched = enrichSessionNote(snapshot, entry.sourceFingerprint, entry.metrics);
+        if (enriched !== snapshot) await writeAtomically(entryPath, enriched);
+      }
+    }
+    return { dailyPath, appended: false };
+  }
+
   if (await readMarkdownIfPresent(entryPath) === undefined) {
     await writeAtomically(entryPath, await readFile(entry.sessionPath, "utf8"));
   }
