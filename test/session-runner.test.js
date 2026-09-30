@@ -33,6 +33,22 @@ test("saved sessions are processed chronologically, not by filesystem name order
   }
 });
 
+test("subagent artifact transcripts are ignored while nested saved sessions are discovered", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "logdig-artifacts-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const sessionsPath = path.join(root, "sessions");
+  const projectPath = path.join(sessionsPath, "--work-demo--");
+  const artifactPath = path.join(projectPath, "subagent-artifacts");
+  await mkdir(artifactPath, { recursive: true });
+  await writeFile(path.join(projectPath, "saved-session.jsonl"), sessionFile("saved-session", Date.now()));
+  await writeFile(path.join(artifactPath, "worker_transcript.jsonl"), JSON.stringify({ type: "message", message: { role: "assistant", content: "transcript" } }));
+
+  const result = await collectSessions({ sessionDirectory: sessionsPath, timeZone: "UTC" });
+
+  assert.deepEqual(result.sessions.map((session) => session.header.id), ["saved-session"]);
+  assert.deepEqual(result.warnings, []);
+});
+
 test("backfill range accepts day counts and all", () => {
   assert.deepEqual(parseBackfillArgument("7"), { days: 7 });
   assert.deepEqual(parseBackfillArgument("all"), { all: true });

@@ -55,7 +55,7 @@ async function findSessionFiles(root) {
     for (const entry of entries) {
       const fullPath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
-        pending.push(fullPath);
+        if (entry.name !== "subagent-artifacts") pending.push(fullPath);
       } else if (entry.isFile() && entry.name.endsWith(".jsonl") && entry.name !== "session.jsonl") {
         files.push(fullPath);
       }
