@@ -190,22 +190,33 @@ async function backfill(args) {
     return;
   }
 
-  console.log("Progress labels identify sessions and their work blocks, not a completion counter.");
-  console.log("Each block reports status changes; parallel sessions may finish out of order.\n");
+  console.log("Results are shown in session order; processing remains parallel.");
+  console.log("One result per work period; resumed sessions may have multiple dated rows.");
+  if (!dryRun) console.log("Summarizing new or changed work may take a few minutes; a slow session can delay later rows.");
+  console.log();
+  const progress = found.sessions.map(() => ({ lines: [], complete: false }));
+  let nextResult = 0;
   const modelClient = createPiModelClient(generationSettings);
   const result = await writeSessions(modelClient, found.sessions, settings, {
     ...found,
     dryRun,
-    onProgress: ({ index, total, sessionId, blockIndex, blockTotal, project, date, time, status, error, reason, sessionPath, dailyPath, prerequisite }) => {
-      if (status === "CHECKING") return;
-      const position = `session ${index}/${total}${blockIndex ? ` · block ${blockIndex}/${blockTotal}` : ""}`;
-      const label = `${date ? `${date}${time ? ` ${time}` : ""} · ` : ""}${project || "session"} (${sessionId.slice(-8)})`;
+    onProgress: ({ index, total, sessionId, project, date, time, status, error, reason, sessionPath, dailyPath, prerequisite, phase }) => {
+      if (!["complete", "skipped", "error"].includes(phase)) return;
+      const position = `${String(index).padStart(String(total).length, "0")}/${total}`;
+      const timestamp = `${date || ""}${time ? ` ${time}` : ""}`.padEnd(16);
       const detail = error || reason;
-      console.log(`[${position}] ${label} · ${progressStatus(status)}${prerequisite ? " · prerequisite" : ""}${detail ? `: ${detail}` : ""}`);
+      const { lines } = progress[index - 1];
+      lines.push(`[${position}] ${timestamp} · ${progressStatus(status, { pad: true })} · ${project || "session"} (${sessionId.slice(-8)})${prerequisite ? " · prerequisite" : ""}${detail ? `: ${detail}` : ""}`);
       if (dryRun && dailyPath) {
-        console.log(`  Daily note: ${dailyPath}`);
-        console.log(`  Full summary: ${sessionPath}`);
-        if (prerequisite) console.log("  Includes this earlier block to establish the continuation link.");
+        lines.push(`  Daily note: ${dailyPath}`, `  Full summary: ${sessionPath}`);
+        if (prerequisite) lines.push("  Includes this earlier block to establish the continuation link.");
+      }
+    },
+    onSessionComplete: ({ index }) => {
+      progress[index - 1].complete = true;
+      while (progress[nextResult]?.complete) {
+        for (const line of progress[nextResult].lines) console.log(line);
+        nextResult++;
       }
     },
   });

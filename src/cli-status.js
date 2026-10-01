@@ -18,6 +18,8 @@ const progressStatuses = {
   PREVIEW: { icon: "\uf06e", color: "36" },
 };
 
+const PROGRESS_STATUS_WIDTH = Math.max(...Object.keys(progressStatuses).map((status) => status.length));
+
 export { STATUS_WIDTH };
 
 function useIcons({
@@ -48,9 +50,10 @@ export function statusPrefix(status, options = {}) {
 export function progressStatus(status, options = {}) {
   const marker = progressStatuses[status];
   if (!marker) throw new TypeError(`Unknown progress status: ${status}`);
-  if (!useIcons(options)) return status;
+  const text = options.pad ? status.padEnd(PROGRESS_STATUS_WIDTH) : status;
+  if (!useIcons(options)) return text;
 
   const noColor = options.noColor ?? process.env.NO_COLOR !== undefined;
   const icon = noColor ? marker.icon : `\u001b[${marker.color}m${marker.icon}\u001b[0m`;
-  return `${icon} ${status}`;
+  return `${icon} ${text}`;
 }

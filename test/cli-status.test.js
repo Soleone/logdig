@@ -24,6 +24,18 @@ test("backfill progress uses colored Nerd Font icons in terminals", () => {
   assert.equal(progressStatus("FAILED", { isTTY: true, term: "xterm-256color" }), "\u001b[31m\uf00d\u001b[0m FAILED");
 });
 
+test("padded progress statuses align with and without terminal icons and color", () => {
+  for (const options of [
+    { isTTY: false }, { isTTY: true, term: "xterm" },
+    { isTTY: true, term: "xterm", noColor: true }, { isTTY: true, icons: false },
+  ]) {
+    const statuses = ["CHECKING", "SUMMARIZING", "SAVED", "UPDATED", "CURRENT", "SKIPPED", "FAILED", "PREVIEW"];
+    const rendered = statuses.map((status) => progressStatus(status, { ...options, pad: true }).replace(/\u001b\[[0-9;]*m/g, ""));
+    assert.equal(new Set(rendered.map((text) => text.length)).size, 1);
+    for (const [index, status] of statuses.entries()) assert.ok(rendered[index].endsWith(status.padEnd(11)));
+  }
+});
+
 test("backfill progress keeps one-word labels without Nerd Fonts or color", () => {
   assert.equal(progressStatus("SUMMARIZING", { isTTY: false }), "SUMMARIZING");
   assert.equal(progressStatus("SKIPPED", { isTTY: true, term: "dumb" }), "SKIPPED");

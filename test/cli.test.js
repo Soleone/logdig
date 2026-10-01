@@ -19,7 +19,7 @@ async function workspace(t, { configured = true } = {}) {
   await mkdir(sessionDirectory, { recursive: true });
   const fakeScript = path.join(root, "fake-pi.mjs");
   await writeFile(fakeScript, `#!/usr/bin/env node
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(args) + "\\n");
 if (args.includes("--version")) console.log("test-pi 1.0");
@@ -31,6 +31,11 @@ else {
     console.error("No authentication configured; open Pi and run /login");
     process.exitCode = 1;
   } else {
+    if (process.env.LOGDIG_TEST_ORDERING_GATE) {
+      if (prompt.includes("Wait for later sessions")) {
+        while (!existsSync(process.env.LOGDIG_TEST_ORDERING_GATE)) await new Promise((resolve) => setTimeout(resolve, 10));
+      } else appendFileSync(process.env.LOGDIG_TEST_ORDERING_GATE, "later session finished\\n");
+    }
     const text = JSON.stringify({ small: "Improved the demo and verified its tests.", medium: "## Goal\\nImprove the demo.\\n\\n## Status\\nTests passed.", large: "Reviewed the demo, made the change, and ran its tests." });
     const usage = { input: 120, output: 30, cacheRead: 450, cacheWrite: 0, cost: { total: 0.025 } };
     for (const event of [
@@ -236,7 +241,7 @@ test("a dry run reports project, date, output file, and new summaries without ca
   const result = await runCli(["backfill", "1", "--dry-run"], w.env);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Dry run: no model requests, no file changes/);
-  assert.match(result.stdout, /\d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project/);
+  assert.match(result.stdout, /\d{4}-\d{2}-\d{2} \d{2}:\d{2} · PREVIEW {4} · demo-project/);
   assert.match(result.stdout, /Daily note: .*Daily Notes/);
   assert.match(result.stdout, /Full summary: .*Sessions.*demo-session\.md/);
   assert.match(result.stdout, /Would create 1 summary, reuse 0, append 1 daily entry/);
@@ -376,10 +381,10 @@ test("real CLI backfill preserves handwritten notes, gives progress, and repeats
   await writeFile(dailyPath, original);
   const first = await runCli(["backfill", "1"], w.env);
   assert.equal(first.code, 0, first.stderr);
-  assert.match(first.stdout, /\[session 1\/1 · block 1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project \(-session\) · SUMMARIZING/);
-  assert.match(first.stdout, /\[session 1\/1 · block 1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project \(-session\) · SAVED/);
+  assert.match(first.stdout, /\[1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · SAVED {6} · demo-project \(-session\)/);
+  assert.doesNotMatch(first.stdout, /SUMMARIZING|CHECKING|block 1\/1/);
   assert.match(first.stdout, /Checked: 1 work block across 1 session\./);
-  assert.doesNotMatch(first.stdout, /large sessions may take a few minutes/);
+  assert.match(first.stdout, /a slow session can delay later rows/);
   assert.match(first.stdout, /Saved: 1 summary created/);
   const daily = await readFile(dailyPath, "utf8");
   for (const text of ["Personal writing stays here.", "A handwritten log.", "# Tomorrow\n\nDon't lose this."]) assert.ok(daily.includes(text));
@@ -409,8 +414,8 @@ test("CLI backfill progress distinguishes skipped sessions from work blocks with
 
   const result = await runCli(["backfill", "1", "--dry-run"], w.env);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /^\[session 1\/2\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project \(de-range\) · SKIPPED: outside date range$/m);
-  assert.match(result.stdout, /^\[session 2\/2 · block 1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project \(in-range\) · PREVIEW$/m);
+  assert.match(result.stdout, /^\[1\/2\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · SKIPPED {4} · demo-project \(de-range\): outside date range$/m);
+  assert.match(result.stdout, /^\[2\/2\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · PREVIEW {4} · demo-project \(in-range\)$/m);
   assert.doesNotMatch(result.stdout, /CHECKING/);
   assert.match(result.stdout, /Checked: 1 work block across 1 session\./);
 });
@@ -433,29 +438,52 @@ test("parallel CLI progress identifies same-time sessions and continuation block
   const first = await runCli(["backfill", "1"], w.env);
   assert.equal(first.code, 0, first.stderr);
   assert.match(first.stdout, /Found 2 saved Pi sessions/);
-  assert.match(first.stdout, /not a completion counter/);
+  assert.match(first.stdout, /Results are shown in session order/);
   assert.match(first.stdout, /Checked: 4 work blocks across 2 sessions\./);
   assert.equal((await calls(w.callsPath)).length, 4);
-  const lines = first.stdout.split("\n").filter((line) => line.startsWith("[session "));
-  assert.equal(lines.length, 8);
+  const lines = first.stdout.split("\n").filter((line) => /^\[\d+\/\d+\]/.test(line));
+  assert.equal(lines.length, 4);
+  assert.deepEqual(lines.map((line) => line.slice(0, 5)), ["[1/2]", "[1/2]", "[2/2]", "[2/2]"]);
+  assert.doesNotMatch(first.stdout, /block \d+\/\d+|SUMMARIZING|CHECKING/);
   for (const [index, id] of [[1, "11111111"], [2, "22222222"]]) {
-    const sessionLines = lines.filter((line) => line.startsWith(`[session ${index}/2 `));
-    assert.equal(sessionLines.length, 4);
-    for (const block of [1, 2]) {
-      const blockLines = sessionLines.filter((line) => line.includes(`block ${block}/2]`));
-      assert.equal(blockLines.length, 2);
-      assert.ok(blockLines.every((line) => line.includes(`demo-project (${id})`)));
-      assert.match(blockLines[0], /SUMMARIZING/);
-      assert.match(blockLines[1], /SAVED/);
-      assert.equal(blockLines.every((line) => line.includes(" · prerequisite")), block === 1);
-    }
+    const sessionLines = lines.filter((line) => line.startsWith(`[${index}/2]`));
+    assert.equal(sessionLines.length, 2);
+    assert.ok(sessionLines.every((line) => line.includes(`SAVED       · demo-project (${id})`)));
+    assert.ok(sessionLines[0].includes(yesterday) && sessionLines[0].endsWith(" · prerequisite"));
+    assert.ok(sessionLines[1].includes(today) && !sessionLines[1].includes(" · prerequisite"));
   }
   const repeated = await runCli(["backfill", "1"], w.env);
   assert.equal(repeated.code, 0, repeated.stderr);
   assert.equal((await calls(w.callsPath)).length, 4);
   assert.doesNotMatch(repeated.stdout, /SUMMARIZING|CHECKING/);
   assert.match(repeated.stdout, /Checked: 2 work blocks across 2 sessions\./);
-  assert.equal(repeated.stdout.split("\n").filter((line) => line.startsWith("[session ") && line.endsWith("CURRENT")).length, 2);
+  assert.equal(repeated.stdout.split("\n").filter((line) => /^\[\d+\/\d+\].* · CURRENT {4} · /.test(line)).length, 2);
+});
+
+test("CLI results stay ordered and columns aligned when later sessions finish first", async (t) => {
+  const w = await workspace(t);
+  const started = Date.now() - 60_000;
+  for (let index = 1; index <= 12; index++) {
+    const id = `ordered-${String(index).padStart(2, "0")}`;
+    await addSession(w.settings, { id, timestamp: started + index * 1_000 });
+    const sessionPath = path.join(w.settings.sessionDirectory, `${id}.jsonl`);
+    if (index === 1) {
+      await writeFile(sessionPath, (await readFile(sessionPath, "utf8")).replace("Make this nicer.", "Wait for later sessions."));
+    } else if (index === 12) {
+      await writeFile(sessionPath, JSON.stringify({ type: "session", version: 3, id, timestamp: new Date(started + index * 1_000).toISOString() }));
+    }
+  }
+  const result = await runCli(["backfill", "all"], {
+    ...w.env, LOGDIG_TEST_ORDERING_GATE: path.join(w.root, "later-finished"),
+  });
+  assert.equal(result.code, 0, result.stderr);
+  const lines = result.stdout.split("\n").filter((line) => /^\[\d+\/\d+\]/.test(line));
+  assert.equal(lines.length, 12);
+  assert.deepEqual(lines.map((line) => line.slice(0, 7)), Array.from({ length: 12 }, (_, index) => `[${String(index + 1).padStart(2, "0")}/12]`));
+  assert.equal(new Set(lines.map((line) => line.indexOf(" · "))).size, 1);
+  assert.equal(new Set(lines.map((line) => line.lastIndexOf(" · "))).size, 1);
+  assert.match(lines.at(-1), /SKIPPED {4} · session \(dered-12\): no journalable events$/);
+  assert.equal((await calls(w.callsPath)).length, 11);
 });
 
 test("CLI backfill updates an evolving session row and keeps a hand-edited blurb", async (t) => {
@@ -494,6 +522,7 @@ test("model failure is visible, exits nonzero, and explains how to retry without
   await addSession(w.settings);
   const result = await runCli(["backfill", "1"], { ...w.env, LOGDIG_TEST_MODEL_ERROR: "1" });
   assert.equal(result.code, 1);
+  assert.match(result.stdout, /^\[1\/1\].* · FAILED {5} · demo-project \(-session\): /m);
   assert.match(result.stderr, /\/login/);
   assert.match(result.stderr, /rerun the same command to retry/);
   await assert.rejects(readdir(w.settings.dailyDirectory), { code: "ENOENT" });

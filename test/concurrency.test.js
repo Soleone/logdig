@@ -64,6 +64,7 @@ for (const [concurrency, expected] of [[undefined, 4], [1, 1], [2, 2], [20, 7]])
     let calls = 0;
     const callsBySession = new Map();
     const completed = [];
+    const sessionsCompleted = [];
     const model = { complete: async (prompt) => {
       const id = prompt.match(/Record (session-\d+)/)[1];
       callsBySession.set(id, (callsBySession.get(id) || 0) + 1);
@@ -78,17 +79,21 @@ for (const [concurrency, expected] of [[undefined, 4], [1, 1], [2, 2], [20, 7]])
     await mkdir(settings.dailyDirectory);
     const dailyPath = path.join(settings.dailyDirectory, "2026-10-01.md");
     await writeFile(dailyPath, "# Personal\n\nKeep my writing.\n");
-    const pending = writeSessions(model, sessions, settings, { onProgress: (event) => {
-      if (event.phase !== "complete") return;
-      completed.push(event.index);
-      if (completed.length === sessions.length - 1) releaseFirst.resolve();
-    } });
+    const pending = writeSessions(model, sessions, settings, {
+      onProgress: (event) => {
+        if (event.phase !== "complete") return;
+        completed.push(event.index);
+        if (completed.length === sessions.length - 1) releaseFirst.resolve();
+      },
+      onSessionComplete: (event) => sessionsCompleted.push(event.index),
+    });
     await started.promise;
     assert.equal(active, expected);
     assert.equal(calls, expected);
     release.resolve();
     const result = await pending;
     assert.equal(peak, expected);
+    assert.deepEqual([...sessionsCompleted].sort((left, right) => left - right), [1, 2, 3, 4, 5, 6, 7]);
     assert.equal(calls, sessions.length);
     assert.deepEqual([...callsBySession.entries()].sort(), sessions.map((item) => [item.header.id, 1]));
     assert.deepEqual(result.errors, []);

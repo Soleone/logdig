@@ -265,6 +265,7 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
     while (nextIndex < sessions.length) {
       const index = nextIndex++;
       await writeSession(sessions[index], index);
+      range.onSessionComplete?.({ index: index + 1, total: sessions.length, sessionId: sessions[index].header.id });
     }
   }));
 
