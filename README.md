@@ -33,7 +33,7 @@ For a comfortable first try:
 - Check the timezone. It determines the journal date and time.
 - Leave automatic capture **off** until you have tried a manual run. Pi integration is optional.
 
-`doctor` checks folder access and Pi availability without requesting a summary. It reports broken paths and a missing Pi executable together, with a next step for each.
+`doctor` checks folder access and Pi availability without requesting a summary. It reports broken paths and a missing Pi executable together, with a next step for each. Interactive terminals use colored Nerd Font status icons; set `LOGDIG_ICONS=0` for text markers, and `NO_COLOR` to disable color.
 
 **`--dry-run` never calls Pi, writes files, or creates folders.** It shows the projects, dates, destination files, matching cached summaries, and sessions that would need model requests. The preview does not print transcript excerpts.
 

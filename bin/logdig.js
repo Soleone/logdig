@@ -9,6 +9,7 @@ import { spawnPiProcess } from "../src/pi-process.js";
 import { environmentOverrides, loadSettings, validateSettings } from "../src/settings.js";
 import { checkDirectory } from "../src/directories.js";
 import { configureLogDig } from "../src/setup.js";
+import { statusPrefix, statusPrefixWidth } from "../src/cli-status.js";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const relativeEntry = path.relative(process.cwd(), fileURLToPath(import.meta.url)).split(path.sep).join("/");
@@ -87,30 +88,30 @@ async function doctor() {
     ["Summary cache", settings.cacheDirectory, true],
     ["Daily notes", settings.dailyDirectory, true],
   ];
-  const statusWidth = "OK    ".length;
+  const statusWidth = statusPrefixWidth();
   const labelWidth = Math.max(...checks.map(([label]) => label.length), "Pi".length);
   const valueColumn = statusWidth + labelWidth + 2;
   const formatLabel = (label, prefixWidth = statusWidth) => `${label}:${" ".repeat(valueColumn - prefixWidth - label.length - 1)}`;
 
-  console.log(`OK    ${formatLabel("Settings")}${settings.filePath}${settings.configured ? " (saved)" : " (not saved; using defaults/environment)"}`);
+  console.log(`${statusPrefix("ok")}${formatLabel("Settings")}${settings.filePath}${settings.configured ? " (saved)" : " (not saved; using defaults/environment)"}`);
   const overrides = environmentOverrides();
   if (overrides.length) console.log(`Environment overrides: ${overrides.join(", ")}`);
 
   for (const [label, directory, writable] of checks) {
     if (!directory) {
-      console.error(`FIX   ${formatLabel(label)}not configured. Run '${commandName} init' to choose a folder.`);
+      console.error(`${statusPrefix("error")}${formatLabel(label)}not configured. Run '${commandName} init' to choose a folder.`);
       issues++;
       continue;
     }
     try {
       const result = await checkDirectory(directory, { writable, allowMissing: writable });
-      console.log(`OK    ${formatLabel(label)}${directory}${result.exists ? "" : " (will be created on a real backfill)"}`);
+      console.log(`${statusPrefix("ok")}${formatLabel(label)}${directory}${result.exists ? "" : " (will be created on a real backfill)"}`);
     } catch (error) {
       if (label === "Session history" && error.code === "ENOENT") {
-        console.warn(`WARN  ${formatLabel(label)}${directory} (not found yet). Start a saved Pi session, or choose its location with '${commandName} init'.`);
+        console.warn(`${statusPrefix("warning")}${formatLabel(label)}${directory} (not found yet). Start a saved Pi session, or choose its location with '${commandName} init'.`);
         warnings++;
       } else {
-        console.error(`FIX   ${formatLabel(label)}${directory} (${error.message}). Check folder permissions or choose another folder with '${commandName} init'.`);
+        console.error(`${statusPrefix("error")}${formatLabel(label)}${directory} (${error.message}). Check folder permissions or choose another folder with '${commandName} init'.`);
         issues++;
       }
     }
@@ -118,9 +119,9 @@ async function doctor() {
 
   try {
     const pi = await runPiCommand(settings.piCommand, ["--version", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--offline"]);
-    console.log(`OK    ${formatLabel("Pi")}${pi.stdout || pi.stderr || "available"}`);
+    console.log(`${statusPrefix("ok")}${formatLabel("Pi")}${pi.stdout || pi.stderr || "available"}`);
   } catch (error) {
-    console.error(`FIX   ${formatLabel("Pi")}${error.message}. Install Pi or set its executable in '${commandName} init' (advanced settings).`);
+    console.error(`${statusPrefix("error")}${formatLabel("Pi")}${error.message}. Install Pi or set its executable in '${commandName} init' (advanced settings).`);
     issues++;
   }
   console.log(`\nSummary model: ${settings.model || "Pi startup default"}`);
