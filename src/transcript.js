@@ -1,3 +1,4 @@
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const READ_TOOLS = new Set([
@@ -248,11 +249,80 @@ function eventFor(entry, formatter, toolCalls) {
   return undefined;
 }
 
+const PROJECT_NAME_CACHE = new Map();
+
+function cleanProjectName(name) {
+  return name.replace(/^\d{4}-\d{2}-\d{2}-(?=.)/, "");
+}
+
+function commonGitDirectory(gitDir) {
+  try {
+    const commonDir = readFileSync(path.join(gitDir, "commondir"), "utf8").trim();
+    return commonDir ? path.resolve(gitDir, commonDir) : undefined;
+  } catch {
+    const segments = gitDir.split(path.sep);
+    const worktreesIndex = segments.lastIndexOf("worktrees");
+    return worktreesIndex >= 0 ? segments.slice(0, worktreesIndex).join(path.sep) : undefined;
+  }
+}
+
+function projectNameFromGitMarker(directory) {
+  try {
+    const gitMarker = path.join(directory, ".git");
+    const markerStat = statSync(gitMarker);
+    if (markerStat.isDirectory()) return cleanProjectName(path.basename(directory)) || undefined;
+    if (!markerStat.isFile()) return undefined;
+
+    const gitDirMatch = readFileSync(gitMarker, "utf8").match(/^gitdir:\s*(.+?)\s*$/m);
+    if (!gitDirMatch) return undefined;
+    const commonDir = commonGitDirectory(path.resolve(directory, gitDirMatch[1]));
+    return commonDir ? cleanProjectName(path.basename(path.dirname(commonDir))) || undefined : undefined;
+  } catch {
+    // Project names are best-effort when historical checkout metadata is missing.
+    return undefined;
+  }
+}
+
+function projectNameFromCwd(cwd) {
+  if (!cwd) return "unknown project";
+  const resolved = path.resolve(cwd);
+  if (PROJECT_NAME_CACHE.has(resolved)) return PROJECT_NAME_CACHE.get(resolved);
+
+  let directory = resolved;
+  while (true) {
+    const project = projectNameFromGitMarker(directory);
+    if (project) {
+      PROJECT_NAME_CACHE.set(resolved, project);
+      return project;
+    }
+
+    const parent = path.dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+
+  // Keep historical sessions grouped when a worktree's checkout has been removed.
+  const segments = resolved.split(path.sep);
+  const worktreesIndex = segments.lastIndexOf("worktrees");
+  const dotWorktreesIndex = segments.lastIndexOf(".worktrees");
+  let fallback = path.basename(resolved);
+  if (worktreesIndex >= 0) {
+    fallback = segments.length > worktreesIndex + 2
+      ? segments[worktreesIndex + 1]
+      : segments[worktreesIndex - 1] || fallback;
+  } else if (dotWorktreesIndex > 0) {
+    fallback = segments[dotWorktreesIndex - 1];
+  }
+  const name = cleanProjectName(fallback) || "unknown project";
+  PROJECT_NAME_CACHE.set(resolved, name);
+  return name;
+}
+
 export function eventsForSession(session, timeZone, extraction = { formatter: localTimeFormatter(timeZone), toolCalls: new Map() }) {
   const events = [];
   const { formatter, toolCalls } = extraction;
   const cwd = session.header.cwd || "";
-  const project = (cwd ? path.basename(cwd) : "").replace(/^\d{4}-\d{2}-\d{2}-(?=.)/, "") || "unknown project";
+  const project = projectNameFromCwd(cwd);
 
   for (const entry of session.entries) {
     const generated = eventFor(entry, formatter, toolCalls);

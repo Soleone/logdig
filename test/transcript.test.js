@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { eventsForSession, redactAndClip, sessionFromJsonl, sessionMetrics } from "../src/transcript.js";
 
 function message(id, parentId, timestamp, role, content, extra = {}) {
@@ -112,6 +115,34 @@ test("try directory dates are removed from project labels without changing sourc
     assert.equal(events[0].cwd, cwd);
     assert.equal(session.header.cwd, cwd);
   }
+});
+
+test("worktree projects resolve to the common repository name", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "logdig-worktree-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const projectRoot = path.join(root, "pi-tasks");
+  const worktree = path.join(root, "worktrees", "tasks", "two");
+  const gitDir = path.join(projectRoot, ".git", "worktrees", "two");
+  await mkdir(worktree, { recursive: true });
+  await mkdir(gitDir, { recursive: true });
+  await writeFile(path.join(worktree, ".git"), `gitdir: ${gitDir}\n`);
+  await writeFile(path.join(gitDir, "commondir"), "../..\n");
+
+  const session = {
+    header: { id: "worktree-session", cwd: worktree },
+    entries: [message("u1", null, "2026-09-28T12:00:00Z", "user", "Made progress.")],
+  };
+  const events = eventsForSession(session, "UTC");
+  assert.equal(events[0].project, "pi-tasks");
+  assert.equal(events[0].cwd, worktree);
+});
+
+test("Herdr worktree paths retain the project name when the checkout is gone", () => {
+  const session = {
+    header: { id: "removed-worktree", cwd: "/home/user/.herdr/worktrees/tasks/two" },
+    entries: [message("u1", null, "2026-09-28T12:00:00Z", "user", "Made progress.")],
+  };
+  assert.equal(eventsForSession(session, "UTC")[0].project, "tasks");
 });
 
 test("sessionFromJsonl parses the header and preserves the file's append order", () => {
