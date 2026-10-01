@@ -19,6 +19,74 @@ async function workspace(t) {
   return { daily, entry, dailyPath: path.join(daily, `${date}.md`) };
 }
 
+test("new Projects sections follow the full anchor section before a sibling or parent heading", async (t) => {
+  const cases = [
+    { anchor: "# Log", before: "# Intro\n\nKeep intro.\n\n# Log\n\nHandwritten log.\n\n## Details\n\nNested content.\n\n", after: "# Tasks\n\nKeep tasks.\n" },
+    { anchor: "## Log", before: "# Day\n\n## Log\n\nHandwritten log.\n\n### Details\n\nNested content.\n\n", after: "## Tasks\n\nKeep tasks.\n" },
+    { anchor: "## Log", before: "# Day\n\n## Log\n\nHandwritten log.\n\n", after: "# Tomorrow\n\nKeep tomorrow.\n" },
+    { anchor: "# Log", before: "# Log   \r\n\r\nHandwritten log.\r\n\r\n", after: "# Tasks\r\n\r\nKeep tasks.\r\n" },
+    { anchor: "# Log", before: "# Log\n\nFirst log.\n\n", after: "# Log\n\nSecond log.\n" },
+  ];
+  for (const { anchor, before, after } of cases) {
+    const { daily, entry, dailyPath } = await workspace(t);
+    const level = anchor.split(" ")[0];
+    const heading = `${level} Projects`;
+    await writeFile(dailyPath, before + after);
+    await appendDailyEntry(daily, heading, entry, undefined, anchor);
+    const text = await readFile(dailyPath, "utf8");
+    assert.ok(text.startsWith(`${before}${heading}\n\n${level}# alpha\n\n`), JSON.stringify({ anchor, text }));
+    assert.ok(text.endsWith("\n\n" + after));
+    await appendDailyEntry(daily, heading, { ...entry, sessionId: "two", project: "beta" }, undefined, anchor);
+    const updated = await readFile(dailyPath, "utf8");
+    assert.equal(updated.split(`${heading}\n`).length - 1, 1);
+    assert.ok(updated.startsWith(before));
+    assert.ok(updated.endsWith(after));
+    assert.ok(updated.includes(`${level}# beta\n\n`));
+  }
+});
+
+test("anchor discovery ignores frontmatter and fenced examples including false section endings", async (t) => {
+  const { daily, entry, dailyPath } = await workspace(t);
+  const before = "---\nexample: |\n# Log\n---\n\n```md\n# Log\n```\n\n# Intro\n\n# Log\n\n```md\n# Tasks\n```\n\n~~~md\n# Tasks\n~~~\n\n## Details\n\nKeep details.\n\n";
+  const after = "# Tasks\n\nKeep tasks.\n";
+  await writeFile(dailyPath, before + after);
+  await appendDailyEntry(daily, "# Projects", entry, undefined, "# Log");
+  const text = await readFile(dailyPath, "utf8");
+  assert.ok(text.startsWith(before + "# Projects\n"));
+  assert.ok(text.endsWith(after));
+});
+
+test("blank, missing, and final anchors append a new Projects section at the end", async (t) => {
+  for (const [anchor, original] of [
+    ["", "# Log\n\nKeep log.\n\n# Tasks\n\nKeep tasks.\n"],
+    ["# Missing", "# Log\n\nKeep log.\n"],
+    ["# Log", "# Log\n\nKeep log.\n\n## Details\n\nKeep details."],
+    ["# Log", "---\nexample: |\n# Log\n---\n\n```md\n# Log\n```\n\n# Tasks\n\nKeep tasks.\n"],
+    ["# Log", ""],
+  ]) {
+    const { daily, entry, dailyPath } = await workspace(t);
+    await writeFile(dailyPath, original);
+    await appendDailyEntry(daily, "# Projects", entry, undefined, anchor);
+    const text = await readFile(dailyPath, "utf8");
+    assert.ok(text.startsWith(original));
+    assert.ok(text.indexOf("# Projects\n") >= original.length);
+    assert.ok(text.endsWith("Made progress.\n"));
+  }
+});
+
+test("anchors do not relocate an existing Projects section or change entry identity", async (t) => {
+  const { daily, entry, dailyPath } = await workspace(t);
+  const before = "# Projects\n\nProject introduction.\n\n";
+  const after = "# Log\n\nKeep log.\n\n# Tasks\n\nKeep tasks.\n";
+  await writeFile(dailyPath, before + after);
+  await appendDailyEntry(daily, "# Projects", entry, undefined, "# Log");
+  const text = await readFile(dailyPath, "utf8");
+  assert.ok(text.startsWith(before + "## alpha\n"));
+  assert.ok(text.endsWith(after));
+  assert.equal((await appendDailyEntry(daily, "# Projects", entry, undefined, "# Tasks")).appended, false);
+  assert.equal(await readFile(dailyPath, "utf8"), text);
+});
+
 test("a singleton puts its timestamp inline and repeat saves leave the note unchanged", async (t) => {
   const { daily, entry, dailyPath } = await workspace(t);
   const summary = "First paragraph.\n\nSecond paragraph stays separate.";

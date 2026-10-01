@@ -18,6 +18,7 @@ In the wizard:
 - **Daily-notes folder:** choose the folder holding `YYYY-MM-DD.md` notes, for example `My Vault/Daily`.
 - **Summary cache:** choose `My Vault/LogDig` to keep the full summaries visible in Obsidian.
 - **Heading and length:** `# Projects` and `small` are a good first try. Your personal `# Log` stays separate.
+- **Anchor heading:** optionally choose `# Log` to create Projects at the end of the Log section, before the next same-level or higher-level heading. The default is `none` (blank): append at the end of the note. Missing anchors also append at the end; existing Projects sections stay in place.
 - **Timezone:** check that this is the timezone you journal in.
 - **Advanced settings:** choose a custom Pi history folder, executable, model, thinking level, or concurrency here. Thinking defaults to no LogDig override; choose an explicit level such as `max` for a cost-first reasoning model if you are willing to wait longer. Concurrency defaults to four independent sessions; use `1` for sequential processing.
 - **Automatic capture:** choose **no** for now.

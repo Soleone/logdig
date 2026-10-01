@@ -139,7 +139,7 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
   let dailyWrites = Promise.resolve();
   const writeDailyEntry = (entry) => {
     // Entry migration can touch multiple dates, so serialize all daily-note read/modify/writes.
-    const pending = dailyWrites.then(() => appendDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry, journaledEntries));
+    const pending = dailyWrites.then(() => appendDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry, journaledEntries, settings.dailyHeaderAnchor));
     // The caller reports a failed write; it must not poison later queued writes.
     dailyWrites = pending.catch(() => {});
     return pending;

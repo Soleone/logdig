@@ -30,6 +30,7 @@ For a comfortable first try:
 - Choose the folder **inside your vault** holding your daily notes, such as `My Vault/Daily`.
 - Put the summary cache in `My Vault/LogDig` if you want to browse it in Obsidian.
 - Keep the `# Projects` heading and **small** summary unless you prefer otherwise. Your personal `# Log` section stays separate.
+- Optionally choose `# Log` as the anchor heading to create Projects after your Log section, before the next sibling heading. Leave it unset to append at the end.
 - Check the timezone. It determines the journal date and time.
 - Leave automatic capture **off** until you have tried a manual run. Pi integration is optional.
 
@@ -209,6 +210,17 @@ Settings contain paths and preferences, never provider credentials:
 - Linux: `$XDG_CONFIG_HOME/logdig/settings.json`, or `~/.config/logdig/settings.json`
 - macOS: `~/Library/Application Support/LogDig/settings.json`
 - Windows: `%APPDATA%\LogDig\settings.json`
+
+`dailyHeader` selects the section for project entries (default `# Projects`). The optional `dailyHeaderAnchor` selects where to create that section:
+
+```json
+{
+  "dailyHeader": "# Projects",
+  "dailyHeaderAnchor": "# Log"
+}
+```
+
+This inserts a new Projects section after the entire Log section, including its subheadings, and before the next same-level or higher-level heading. Use the same heading level for both settings to keep the sections as siblings. The anchor must be one Markdown heading, including its `#` level, and matches the first occurrence outside frontmatter and fenced code. The default is `""` (blank): append at the end of the note. A missing anchor also falls back to the end. Existing Projects sections stay where they are; this setting does not relocate them or regenerate summaries. Run `init` to set the anchor or choose `none` to clear it. `PI_JOURNAL_DAILY_HEADER_ANCHOR` overrides the saved setting, including an empty value to clear it.
 
 Backfill and automatic capture process up to **four independent sessions concurrently** by default. Set `concurrency` in the settings file or choose “Maximum parallel sessions” in setup's advanced settings. It must be a positive integer; use `1` for sequential processing or to reduce provider rate-limit pressure. Work blocks and extraction requests within each session remain sequential to preserve continuation links. Shared daily-note updates are serialized to avoid overwriting entries. CLI result rows appear in session order even when parallel sessions finish out of order. Session numbers are zero-padded to match the total, for example `[01/65]`, followed by the date, a fixed-width status column, project, and short session ID. Each work period has one final result row; resumed sessions can have multiple dated rows with the same session number. In interactive terminals, a bounded live panel below the permanent results shows active workers (`CHECKING` or `SUMMARIZING`), the completed-session count, and sessions that are `DONE` but awaiting ordered output. The panel redraws in place and clears when the run finishes. A slow earlier session can delay display of later result rows, but does not block processing or live feedback. Redirected output and `TERM=dumb` use plain `Active` and `Finished` log lines instead of cursor controls. Dry-run output stays static. Blocks outside the selected range that are needed for continuation links are marked `prerequisite`. The final checked count distinguishes work blocks from sessions. Status reports retain chronological session order. Changing concurrency does not invalidate cached summaries. Avoid running separate LogDig commands against the same notes at the same time; the write queue is local to one run.
 

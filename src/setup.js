@@ -69,6 +69,9 @@ export async function configureLogDig(settings, commandName = "logdig") {
       (value) => folder("cacheDirectory", value, true));
     console.log("Entries are grouped by project, then by time, under this heading. Use # Projects to keep your personal log separate.");
     const dailyHeader = await ask("Heading for journal entries", settings.dailyHeader, (value) => field("dailyHeader", value));
+    console.log("Create that section after an anchor's full section, before the next same-level or higher-level heading. Blank or missing anchors append at the end; existing sections stay in place.");
+    const dailyHeaderAnchor = await ask("Anchor heading (e.g. # Log), or 'none'", settings.dailyHeaderAnchor || "none",
+      (value) => field("dailyHeaderAnchor", value.toLowerCase() === "none" ? "" : value));
     console.log("Small: a few sentences. Medium: goal, progress, and next steps. Large: a short timeline.");
     const dailySummary = await ask("Daily summary (small/medium/large)", settings.dailySummary, (value) => field("dailySummary", value));
     const timeZone = await ask("Timezone", settings.timeZone, (value) => field("timeZone", value));
@@ -98,12 +101,13 @@ export async function configureLogDig(settings, commandName = "logdig") {
     const autoCapture = await ask("Capture on Pi shutdown? (yes/no)", settings.autoCapture ? "yes" : "no", yesNo);
     installExtension = await ask("Install the Pi extension for /journal? (yes/no)", "no", yesNo);
 
-    nextSettings = { ...settings, cacheDirectory, dailyDirectory, dailyHeader, dailySummary, timeZone, sessionDirectory, piCommand, model, thinkingLevel, concurrency, autoCapture };
+    nextSettings = { ...settings, cacheDirectory, dailyDirectory, dailyHeader, dailyHeaderAnchor, dailySummary, timeZone, sessionDirectory, piCommand, model, thinkingLevel, concurrency, autoCapture };
     console.log([
       "",
       "Ready to save",
       `  Daily notes: ${dailyDirectory}/YYYY-MM-DD.md`,
       `  Heading:     ${dailyHeader}`,
+      `  Anchor:      ${dailyHeaderAnchor || "none (append at end)"}`,
       `  Summary:     ${dailySummary}, in ${timeZone}`,
       `  Cache:       ${path.join(cacheDirectory, "Sessions")}`,
       `  History:     ${sessionDirectory}`,

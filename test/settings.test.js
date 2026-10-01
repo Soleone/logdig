@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { environmentOverrides, loadSettings, saveSettings, settingsFilePath, validateSettings } from "../src/settings.js";
@@ -26,12 +26,36 @@ test("new settings default to Projects while saved headings and overrides remain
   const filePath = path.join(root, "settings.json");
   const initial = await loadSettings({ filePath, env: {}, home: root });
   assert.equal(initial.dailyHeader, "# Projects");
+  assert.equal(initial.dailyHeaderAnchor, "");
   const required = { cacheDirectory: path.join(root, "cache"), dailyDirectory: path.join(root, "daily"), timeZone: "UTC" };
   await saveSettings(required, filePath);
   assert.equal((await loadSettings({ filePath, env: {}, home: root })).dailyHeader, "# Projects");
   await saveSettings({ ...required, dailyHeader: "# Log" }, filePath);
   assert.equal((await loadSettings({ filePath, env: {}, home: root })).dailyHeader, "# Log");
   assert.equal((await loadSettings({ filePath, env: { PI_JOURNAL_DAILY_HEADER: "## Custom" }, home: root })).dailyHeader, "## Custom");
+});
+
+test("anchor headings default to blank, round-trip, and support environment overrides", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "logdig-anchor-settings-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, "settings.json");
+  const required = { cacheDirectory: path.join(root, "cache"), dailyDirectory: path.join(root, "daily"), timeZone: "UTC" };
+  await saveSettings(required, filePath);
+  assert.equal(JSON.parse(await readFile(filePath, "utf8")).dailyHeaderAnchor, "");
+  const legacy = JSON.parse(await readFile(filePath, "utf8"));
+  delete legacy.dailyHeaderAnchor;
+  await writeFile(filePath, JSON.stringify(legacy));
+  assert.equal((await loadSettings({ filePath, env: {} })).dailyHeaderAnchor, "");
+  await saveSettings({ ...required, dailyHeaderAnchor: "  # Log  " }, filePath);
+  assert.equal((await loadSettings({ filePath, env: {} })).dailyHeaderAnchor, "# Log");
+  assert.equal((await loadSettings({ filePath, env: { PI_JOURNAL_DAILY_HEADER_ANCHOR: "## Notes" } })).dailyHeaderAnchor, "## Notes");
+  assert.equal((await loadSettings({ filePath, env: { PI_JOURNAL_DAILY_HEADER_ANCHOR: "" } })).dailyHeaderAnchor, "");
+  assert.deepEqual(environmentOverrides({ PI_JOURNAL_DAILY_HEADER_ANCHOR: "" }), ["PI_JOURNAL_DAILY_HEADER_ANCHOR"]);
+  await saveSettings({ ...required, dailyHeaderAnchor: "   " }, filePath);
+  assert.equal((await loadSettings({ filePath, env: {} })).dailyHeaderAnchor, "");
+  for (const invalid of ["Log", "####### Log", "# Log\n# Tasks", 42, true, {}]) {
+    await assert.rejects(saveSettings({ ...required, dailyHeaderAnchor: invalid }, filePath), /dailyHeaderAnchor/);
+  }
 });
 
 test("settings round-trip without storing credentials and environment values override them", async () => {

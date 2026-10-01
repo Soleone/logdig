@@ -9,6 +9,7 @@ const ENVIRONMENT_SETTINGS = [
   ["PI_JOURNAL_DIR", "cacheDirectory"],
   ["PI_JOURNAL_DAILY_DIR", "dailyDirectory"],
   ["PI_JOURNAL_DAILY_HEADER", "dailyHeader"],
+  ["PI_JOURNAL_DAILY_HEADER_ANCHOR", "dailyHeaderAnchor"],
   ["PI_JOURNAL_DAILY_SUMMARY", "dailySummary"],
   ["PI_JOURNAL_TIMEZONE", "timeZone"],
   ["PI_JOURNAL_MODEL", "model"],
@@ -42,6 +43,7 @@ function defaults({ env = process.env, home = homedir() } = {}) {
     cacheDirectory: undefined,
     dailyDirectory: undefined,
     dailyHeader: "# Projects",
+    dailyHeaderAnchor: "",
     dailySummary: "small",
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     sessionDirectory: path.join(expandPath(agentDirectory, home), "sessions"),
@@ -66,6 +68,14 @@ export function validateSettings(settings, { requirePaths = false, home = homedi
   settings.dailyHeader = settings.dailyHeader.trim();
   if (!/^#{1,6}\s+[^\r\n]+$/.test(settings.dailyHeader)) {
     throw new Error("dailyHeader must be one Markdown heading, such as '# Projects'");
+  }
+  settings.dailyHeaderAnchor ??= "";
+  if (typeof settings.dailyHeaderAnchor !== "string") {
+    throw new Error("dailyHeaderAnchor must be blank or one Markdown heading, such as '# Log'");
+  }
+  settings.dailyHeaderAnchor = settings.dailyHeaderAnchor.trim();
+  if (settings.dailyHeaderAnchor && !/^#{1,6}\s+[^\r\n]+$/.test(settings.dailyHeaderAnchor)) {
+    throw new Error("dailyHeaderAnchor must be blank or one Markdown heading, such as '# Log'");
   }
   if (typeof settings.timeZone !== "string" || !settings.timeZone.trim()) throw new Error("timeZone must be a valid timezone");
   try {
@@ -122,7 +132,7 @@ export function validateSettings(settings, { requirePaths = false, home = homedi
 
 export function environmentOverrides(env = process.env) {
   return [...ENVIRONMENT_SETTINGS.map(([variable]) => variable), "PI_JOURNAL_AUTO"]
-    .filter((variable) => env[variable] !== undefined && (env[variable] !== "" || variable === "PI_JOURNAL_AUTO"));
+    .filter((variable) => env[variable] !== undefined && (env[variable] !== "" || variable === "PI_JOURNAL_AUTO" || variable === "PI_JOURNAL_DAILY_HEADER_ANCHOR"));
 }
 
 export async function loadSettings(options = {}) {
@@ -145,7 +155,7 @@ export async function loadSettings(options = {}) {
 
   const settings = { ...defaults({ env, home }), ...stored };
   for (const [variable, key] of ENVIRONMENT_SETTINGS) {
-    if (env[variable] !== undefined && env[variable] !== "") settings[key] = env[variable];
+    if (env[variable] !== undefined && (env[variable] !== "" || key === "dailyHeaderAnchor")) settings[key] = env[variable];
   }
   if (env.PI_JOURNAL_AUTO !== undefined) settings.autoCapture = env.PI_JOURNAL_AUTO === "1" || env.PI_JOURNAL_AUTO === "true";
   validateSettings(settings);
@@ -158,6 +168,7 @@ export async function saveSettings(settings, filePath = settings.filePath || set
     cacheDirectory: settings.cacheDirectory,
     dailyDirectory: settings.dailyDirectory,
     dailyHeader: settings.dailyHeader || "# Projects",
+    dailyHeaderAnchor: settings.dailyHeaderAnchor ?? "",
     dailySummary: settings.dailySummary || "small",
     timeZone: settings.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     sessionDirectory: settings.sessionDirectory,

@@ -127,6 +127,7 @@ test("setup explains choices and recovers locally from invalid paths, headings, 
     notAFolder, w.settings.dailyDirectory,
     w.settings.cacheDirectory,
     "Log", "## Log",
+    "Log", "# Log",
     "tiny", "MEDIUM",
     "Not/A_Timezone", "UTC",
     "maybe", "yes",
@@ -149,6 +150,8 @@ test("setup explains choices and recovers locally from invalid paths, headings, 
   assert.match(result.stderr, /Environment overrides are active/);
   const saved = await loadSettings({ filePath: w.filePath, env: {}, home: w.root });
   assert.equal(saved.dailyHeader, "## Log");
+  assert.equal(saved.dailyHeaderAnchor, "# Log");
+  assert.match(result.stdout, /Anchor:\s+# Log/);
   assert.equal(saved.dailySummary, "medium");
   assert.equal(saved.timeZone, "UTC");
   assert.equal(saved.model, "test/fake");
@@ -166,12 +169,49 @@ test("setup explains choices and recovers locally from invalid paths, headings, 
 test("declining setup confirmation preserves the existing settings byte for byte", async (t) => {
   const w = await workspace(t);
   const before = await readFile(w.filePath, "utf8");
-  const input = ["", "", "", "", "", "no", "no", "no", "no"].join("\n") + "\n";
+  const input = ["", "", "", "", "", "", "no", "no", "no", "no"].join("\n") + "\n";
   const result = await runCli(["init"], w.env, { input });
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /settings were not changed/);
   assert.equal(await readFile(w.filePath, "utf8"), before);
   assert.deepEqual(await calls(w.callsPath), []);
+});
+
+test("setup keeps or clears a saved anchor heading", async (t) => {
+  const w = await workspace(t);
+  await saveSettings({ ...w.settings, dailyHeaderAnchor: "# Log" }, w.filePath);
+  for (const answer of ["", "none"]) {
+    const input = ["", "", "", answer, "", "", "no", "no", "no", "yes"].join("\n") + "\n";
+    const result = await runCli(["init"], w.env, { input });
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /Anchor heading .*\[# Log\]/);
+    const saved = await loadSettings({ filePath: w.filePath, env: {} });
+    assert.equal(saved.dailyHeaderAnchor, answer === "none" ? "" : "# Log");
+  }
+  assert.deepEqual(await calls(w.callsPath), []);
+});
+
+test("backfill uses the configured anchor without modifying notes during preview", async (t) => {
+  const w = await workspace(t);
+  await saveSettings({ ...w.settings, dailyHeaderAnchor: "# Log" }, w.filePath);
+  const date = await addSession(w.settings);
+  await mkdir(w.settings.dailyDirectory, { recursive: true });
+  const dailyPath = path.join(w.settings.dailyDirectory, `${date}.md`);
+  const before = "# Log\n\nHandwritten log.\n\n## Detail\n\nKeep detail.\n\n";
+  const after = "# Tasks\n\nKeep tasks.\n";
+  await writeFile(dailyPath, before + after);
+  const config = await runCli(["config"], w.env);
+  assert.equal(config.code, 0, config.stderr);
+  assert.match(config.stdout, /"dailyHeaderAnchor": "# Log"/);
+  const preview = await runCli(["backfill", "1", "--dry-run"], w.env);
+  assert.equal(preview.code, 0, preview.stderr);
+  assert.equal(await readFile(dailyPath, "utf8"), before + after);
+  assert.deepEqual(await calls(w.callsPath), []);
+  const saved = await runCli(["backfill", "1"], w.env);
+  assert.equal(saved.code, 0, saved.stderr);
+  const text = await readFile(dailyPath, "utf8");
+  assert.ok(text.startsWith(before + "# Projects\n\n## demo-project\n"));
+  assert.ok(text.endsWith(after));
 });
 
 test("ending setup input early does not overwrite settings", async (t) => {
@@ -741,7 +781,7 @@ test("saved concurrency is shown by config and backfill without changing setting
 test("setup can clear a saved thinking override without changing the selected model", async (t) => {
   const w = await workspace(t);
   await saveSettings({ ...w.settings, thinkingLevel: "max" }, w.filePath);
-  const input = ["", "", "", "", "", "yes", "", "", "", "default", "", "no", "no", "yes"].join("\n") + "\n";
+  const input = ["", "", "", "", "", "", "yes", "", "", "", "default", "", "no", "no", "yes"].join("\n") + "\n";
   const result = await runCli(["init"], w.env, { input });
   assert.equal(result.code, 0, result.stderr);
   const saved = await loadSettings({ filePath: w.filePath, env: {} });

@@ -391,7 +391,7 @@ function isProjectHeading(line, targetLevel) {
 function addEntryAt(markdown, offset, entry) {
   const before = markdown.slice(0, offset).replace(/\n{3,}$/, "\n\n");
   const after = markdown.slice(offset);
-  const separator = before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+  const separator = /\r?\n\r?\n$/.test(before) ? "" : before.endsWith("\n") ? "\n" : "\n\n";
   const suffix = after ? "\n\n" : "\n";
   return `${before}${separator}${entry}${suffix}${after}`;
 }
@@ -503,7 +503,7 @@ function removeEmptyProjectGroups(markdown, heading) {
   return removeMarkdownRanges(markdown, emptyGroups);
 }
 
-function appendUnderProject(markdown, heading, entry) {
+function appendUnderProject(markdown, heading, entry, anchorHeading) {
   const targetLevel = headingLevel(heading);
   const project = entry.project.replace(/[\\`*_[\]<>|&#\r\n]/g, (character) =>
     /[\r\n]/.test(character) ? " " : `&#${character.charCodeAt(0)};`);
@@ -568,8 +568,24 @@ function appendUnderProject(markdown, heading, entry) {
 
   const text = dailyEntryText(entry, heading);
   if (sectionStart === -1) {
-    const separator = !markdown ? "" : markdown.endsWith("\n\n") ? "" : markdown.endsWith("\n") ? "\n" : "\n\n";
-    return `${markdown}${separator}${heading}\n\n${projectHeading}\n\n${text}\n`;
+    let anchorFound = false;
+    let offset = markdown.length;
+    const anchorLevel = headingLevel(anchorHeading || "");
+    if (anchorHeading) {
+      for (const line of markdownLines(markdown)) {
+        if (line.blocked) continue;
+        if (!anchorFound) {
+          if (line.text.trimEnd() === anchorHeading) anchorFound = true;
+        } else if (headingLevel(line.text) <= anchorLevel) {
+          offset = line.start;
+          break;
+        }
+      }
+    }
+    const section = `${heading}\n\n${projectHeading}\n\n${text}`;
+    if (offset < markdown.length) return addEntryAt(markdown, offset, section);
+    const separator = !markdown || /\r?\n\r?\n$/.test(markdown) ? "" : markdown.endsWith("\n") ? "\n" : "\n\n";
+    return `${markdown}${separator}${section}\n`;
   }
 
   if (projectStart === -1) return addEntryAt(markdown, sectionEnd, `${projectHeading}\n\n${text}`);
@@ -668,7 +684,7 @@ async function updateEntrySnapshot(entryPath, entry, createIfMissing) {
   if (enriched !== snapshot) await writeAtomically(entryPath, enriched);
 }
 
-async function updateSessionDailyNotes(heading, entry, inspection) {
+async function updateSessionDailyNotes(heading, entry, inspection, anchorHeading) {
   const { dailyPath, existing, sessionBlocks, sessionDocuments } = inspection;
   const customSummaries = [...new Set(sessionBlocks
     .filter((block) => !isUneditedEntry(block))
@@ -686,12 +702,12 @@ async function updateSessionDailyNotes(heading, entry, inspection) {
   const updatedMarkdown = appendUnderProject(markdown, heading, {
     ...entry,
     ...(customSummaries.length ? { summaryOverride: customSummaries.join("\n\n") } : {}),
-  });
+  }, anchorHeading);
   await writeAtomically(dailyPath, updatedMarkdown);
   for (const [filePath, contents] of cleanedDocuments) await writeAtomically(filePath, contents);
 }
 
-export async function appendDailyEntry(dailyDirectory, heading, entry, journaledEntries) {
+export async function appendDailyEntry(dailyDirectory, heading, entry, journaledEntries, anchorHeading = "") {
   const inspection = await inspectDailyEntry(dailyDirectory, heading, entry, journaledEntries);
   const { dailyPath, appended, updated } = inspection;
   const entryPath = path.join(path.dirname(entry.sessionPath), "..", "Entries", `${dailyEntryId(entry, heading)}.md`);
@@ -701,6 +717,6 @@ export async function appendDailyEntry(dailyDirectory, heading, entry, journaled
   }
 
   await updateEntrySnapshot(entryPath, entry, true);
-  await updateSessionDailyNotes(heading, entry, inspection);
+  await updateSessionDailyNotes(heading, entry, inspection, anchorHeading);
   return { dailyPath, entryPath, appended, updated: updated || inspection.sessionBlocks.length > 0, legacyEntry: inspection.legacyEntry };
 }
