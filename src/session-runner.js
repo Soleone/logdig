@@ -2,6 +2,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { appendDailyEntry, dailyEntryId, inspectDailyEntry, inspectSessionSummary, listJournaledSessions, saveSessionSummary } from "./journal.js";
 import { sessionFromJsonl, sessionMetrics } from "./transcript.js";
+import { DEFAULT_CONCURRENCY } from "./settings.js";
 import { assignLegacyBlocks, blockInRange, workBlocksForSession } from "./work-blocks.js";
 
 function localDate(timestamp, timeZone) {
@@ -130,11 +131,19 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
   let sessionsSkipped = 0;
   const dates = new Set();
   const dailyPaths = new Set();
-  const errors = [];
-  const sessionResults = [];
+  const results = sessions.map(() => ({ errors: [], sessionResults: [] }));
   const journaledEntries = range.journaledEntries || await listJournaledSessions(settings.cacheDirectory);
+  let dailyWrites = Promise.resolve();
+  const writeDailyEntry = (entry) => {
+    // Entry migration can touch multiple dates, so serialize all daily-note read/modify/writes.
+    const pending = dailyWrites.then(() => appendDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry, journaledEntries));
+    // The caller reports a failed write; it must not poison later queued writes.
+    dailyWrites = pending.catch(() => {});
+    return pending;
+  };
 
-  for (const [index, session] of sessions.entries()) {
+  async function writeSession(session, index) {
+    const { errors, sessionResults } = results[index];
     const progress = { index: index + 1, total: sessions.length, sessionId: session.header.id };
     let blocks;
     try {
@@ -143,7 +152,7 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
       errors.push(`${session.header.id}: ${error.message}`);
       sessionResults.push({ sessionId: session.header.id, status: "error", error: error.message });
       range.onProgress?.({ ...progress, phase: "error", error: error.message });
-      continue;
+      return;
     }
     const versions = journaledEntries.get(session.header.id) || [];
     journaledEntries.set(session.header.id, versions);
@@ -154,7 +163,7 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
       const reason = blocks.length ? "outside date range" : "no journalable events";
       sessionResults.push({ sessionId: session.header.id, status: "skipped", reason });
       range.onProgress?.({ ...progress, phase: "skipped", status: reason });
-      continue;
+      return;
     }
 
     const plannedSnapshots = new Map();
@@ -194,7 +203,7 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
         };
         const dailyEntry = range.dryRun
           ? await inspectDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry, journaledEntries)
-          : await appendDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry, journaledEntries);
+          : await writeDailyEntry(entry);
         if (dailyEntry.updated) entriesUpdated++;
         else if (dailyEntry.appended) entriesAppended++;
         else entriesSkipped++;
@@ -242,7 +251,21 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
     }
   }
 
-  return { summariesCreated, summariesReused, entriesAppended, entriesUpdated, entriesSkipped, sessionsSkipped, dates: [...dates].sort(), dailyPaths: [...dailyPaths].sort(), errors, sessionResults };
+  let nextIndex = 0;
+  const concurrency = Math.min(settings.concurrency ?? DEFAULT_CONCURRENCY, sessions.length);
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (nextIndex < sessions.length) {
+      const index = nextIndex++;
+      await writeSession(sessions[index], index);
+    }
+  }));
+
+  return {
+    summariesCreated, summariesReused, entriesAppended, entriesUpdated, entriesSkipped, sessionsSkipped,
+    dates: [...dates].sort(), dailyPaths: [...dailyPaths].sort(),
+    errors: results.flatMap((result) => result.errors),
+    sessionResults: results.flatMap((result) => result.sessionResults),
+  };
 }
 
 export function parseBackfillArgument(argument = "", command = "backfill") {

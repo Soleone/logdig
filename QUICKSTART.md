@@ -19,7 +19,7 @@ In the wizard:
 - **Summary cache:** choose `My Vault/LogDig` to keep the full summaries visible in Obsidian.
 - **Heading and length:** `# Projects` and `small` are a good first try. Your personal `# Log` stays separate.
 - **Timezone:** check that this is the timezone you journal in.
-- **Advanced settings:** choose a custom Pi history folder, executable, model, or thinking level here. Thinking defaults to no LogDig override; choose an explicit level such as `max` for a cost-first reasoning model if you are willing to wait longer.
+- **Advanced settings:** choose a custom Pi history folder, executable, model, thinking level, or concurrency here. Thinking defaults to no LogDig override; choose an explicit level such as `max` for a cost-first reasoning model if you are willing to wait longer. Concurrency defaults to four independent sessions; use `1` for sequential processing.
 - **Automatic capture:** choose **no** for now.
 - **Pi extension:** optional. The CLI works without it.
 

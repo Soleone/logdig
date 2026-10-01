@@ -192,6 +192,8 @@ Settings contain paths and preferences, never provider credentials:
 - macOS: `~/Library/Application Support/LogDig/settings.json`
 - Windows: `%APPDATA%\LogDig\settings.json`
 
+Backfill and automatic capture process up to **four independent sessions concurrently** by default. Set `concurrency` in the settings file or choose “Maximum parallel sessions” in setup's advanced settings. It must be a positive integer; use `1` for sequential processing or to reduce provider rate-limit pressure. Work blocks and extraction requests within each session remain sequential to preserve continuation links. Shared daily-note updates are serialized to avoid overwriting entries. Progress messages can arrive out of session order, but status reports retain chronological session order. Changing concurrency does not invalidate cached summaries. Avoid running separate LogDig commands against the same notes at the same time; the write queue is local to one run.
+
 Set `LOGDIG_CONFIG_PATH` to choose another settings file. Existing `PI_JOURNAL_*` environment variables remain supported and override saved values. Setup, `config`, and `doctor` name active overrides so you can see why a saved preference is not taking effect.
 
 - **No saved history found:** create a saved Pi session, or use setup's advanced settings to select your history folder. This is especially useful with a custom Pi session directory.

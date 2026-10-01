@@ -114,7 +114,7 @@ test("CLI help and subcommand help work before setup without writing settings", 
   assert.deepEqual(await calls(w.callsPath), []);
 });
 
-test("setup explains choices and recovers locally from invalid paths, headings, summaries, timezone, model, thinking, and yes/no input", async (t) => {
+test("setup explains choices and recovers locally from invalid paths, headings, summaries, timezone, model, thinking, concurrency, and yes/no input", async (t) => {
   const w = await workspace(t, { configured: false });
   const notAFolder = path.join(w.root, "a-file.md");
   await writeFile(notAFolder, "keep this");
@@ -129,6 +129,7 @@ test("setup explains choices and recovers locally from invalid paths, headings, 
     w.settings.piCommand,
     "invalid-model", "test/fake",
     "ultra", "MAX",
+    "0", "1.5", "2",
     "later", "no",
     "no",
     "yes",
@@ -147,6 +148,8 @@ test("setup explains choices and recovers locally from invalid paths, headings, 
   assert.equal(saved.timeZone, "UTC");
   assert.equal(saved.model, "test/fake");
   assert.equal(saved.thinkingLevel, "max");
+  assert.equal(saved.concurrency, 2);
+  assert.match(result.stdout, /Parallel sessions:\s+2/);
   assert.match(result.stdout, /Thinking:\s+max/);
   assert.equal(saved.autoCapture, false);
   assert.equal(await readFile(notAFolder, "utf8"), "keep this");
@@ -531,10 +534,26 @@ test("thinking settings affect cache freshness, status, environment reporting, a
   assert.equal((await loadSettings({ filePath: w.filePath, env: {} })).thinkingLevel, "max");
 });
 
+test("saved concurrency is shown by config and backfill without changing settings", async (t) => {
+  const w = await workspace(t);
+  await addSession(w.settings);
+  await saveSettings({ ...w.settings, concurrency: 2 }, w.filePath);
+  const before = await readFile(w.filePath, "utf8");
+  const config = await runCli(["config"], w.env);
+  assert.equal(config.code, 0, config.stderr);
+  assert.match(config.stdout, /"concurrency": 2/);
+  const preview = await runCli(["backfill", "1", "--dry-run"], w.env);
+  assert.equal(preview.code, 0, preview.stderr);
+  assert.match(preview.stdout, /Parallel sessions: 2/);
+  assert.equal(await readFile(w.filePath, "utf8"), before);
+  assert.deepEqual(await calls(w.callsPath), []);
+  await assert.rejects(readdir(w.settings.dailyDirectory), { code: "ENOENT" });
+});
+
 test("setup can clear a saved thinking override without changing the selected model", async (t) => {
   const w = await workspace(t);
   await saveSettings({ ...w.settings, thinkingLevel: "max" }, w.filePath);
-  const input = ["", "", "", "", "", "yes", "", "", "", "default", "no", "no", "yes"].join("\n") + "\n";
+  const input = ["", "", "", "", "", "yes", "", "", "", "default", "", "no", "no", "yes"].join("\n") + "\n";
   const result = await runCli(["init"], w.env, { input });
   assert.equal(result.code, 0, result.stderr);
   const saved = await loadSettings({ filePath: w.filePath, env: {} });

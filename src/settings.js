@@ -3,6 +3,8 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
+export const DEFAULT_CONCURRENCY = 4;
+
 const ENVIRONMENT_SETTINGS = [
   ["PI_JOURNAL_DIR", "cacheDirectory"],
   ["PI_JOURNAL_DAILY_DIR", "dailyDirectory"],
@@ -44,6 +46,7 @@ function defaults({ env = process.env, home = homedir() } = {}) {
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     sessionDirectory: path.join(expandPath(agentDirectory, home), "sessions"),
     piCommand: "pi",
+    concurrency: DEFAULT_CONCURRENCY,
     autoCapture: env.PI_JOURNAL_AUTO === "1",
   };
 }
@@ -93,6 +96,14 @@ export function validateSettings(settings, { requirePaths = false, home = homedi
       throw new Error("thinkingLevel must be default, off, minimal, low, medium, high, xhigh, or max");
     }
     settings.thinkingLevel = level === "default" ? undefined : level;
+  }
+  if (settings.concurrency !== undefined) {
+    if (typeof settings.concurrency === "string" && /^\d+$/.test(settings.concurrency.trim())) {
+      settings.concurrency = Number(settings.concurrency.trim());
+    }
+    if (!Number.isSafeInteger(settings.concurrency) || settings.concurrency < 1) {
+      throw new Error("concurrency must be a positive integer (1 runs sessions sequentially)");
+    }
   }
   if (settings.autoCapture !== undefined && typeof settings.autoCapture !== "boolean") {
     throw new Error("autoCapture must be a boolean");
@@ -151,6 +162,7 @@ export async function saveSettings(settings, filePath = settings.filePath || set
     timeZone: settings.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     sessionDirectory: settings.sessionDirectory,
     piCommand: settings.piCommand || "pi",
+    concurrency: settings.concurrency ?? DEFAULT_CONCURRENCY,
     autoCapture: settings.autoCapture === true,
     ...(settings.model ? { model: settings.model } : {}),
     ...(settings.thinkingLevel !== undefined ? { thinkingLevel: settings.thinkingLevel } : {}),

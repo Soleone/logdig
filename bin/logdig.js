@@ -126,6 +126,7 @@ async function doctor() {
   }
   console.log(`\nSummary model: ${settings.model || "Pi startup default"}`);
   console.log(`Thinking: ${settings.thinkingLevel || "Pi startup default"}`);
+  console.log(`Parallel sessions: ${settings.concurrency}`);
   console.log("Authentication is checked only when you request a summary. If it fails, open Pi and run /login.");
   if (issues) {
     console.error(`\n${issues} thing${issues === 1 ? "" : "s"} to fix. Address the FIX lines above, then run '${commandName} doctor' again.`);
@@ -173,6 +174,7 @@ async function backfill(args) {
   console.log(`Summary cache: ${path.join(settings.cacheDirectory, "Sessions")}`);
   console.log(`Model: ${selectedModel || "Pi startup default"}`);
   console.log(`Thinking: ${selectedThinking || "Pi startup default"}`);
+  console.log(`Parallel sessions: ${settings.concurrency}`);
   console.log(dryRun
     ? "Dry run: no model requests, no file changes, and no folders created."
     : "Only new or changed work blocks need summarizing. Selected, redacted history is sent to Pi's model; provider charges may apply.");

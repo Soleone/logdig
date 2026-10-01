@@ -77,8 +77,9 @@ export async function configureLogDig(settings, commandName = "logdig") {
     console.log(`History: ${settings.sessionDirectory}`);
     console.log(`Model: ${settings.model || "Pi's default (your active model for /journal)"}`);
     console.log(`Thinking: ${settings.thinkingLevel || "default (no LogDig override)"}`);
-    const advanced = await ask("Change history folder, Pi executable, model, or thinking level? (yes/no)", "no", yesNo);
-    let { sessionDirectory, piCommand, model, thinkingLevel } = settings;
+    console.log(`Parallel sessions: ${settings.concurrency}`);
+    const advanced = await ask("Change history folder, Pi executable, model, thinking level, or concurrency? (yes/no)", "no", yesNo);
+    let { sessionDirectory, piCommand, model, thinkingLevel, concurrency } = settings;
     if (advanced) {
       sessionDirectory = await ask("Pi session-history folder", sessionDirectory,
         (value) => folder("sessionDirectory", value, false));
@@ -88,6 +89,8 @@ export async function configureLogDig(settings, commandName = "logdig") {
       console.log("More thinking can help distinguish attempts from outcomes, but takes longer and may cost more. Support depends on the model.");
       thinkingLevel = await ask("Thinking level (default/off/minimal/low/medium/high/xhigh/max)", thinkingLevel || "default",
         (value) => field("thinkingLevel", value));
+      console.log("Independent sessions run in parallel. Use 1 for sequential processing or to reduce provider rate-limit pressure.");
+      concurrency = await ask("Maximum parallel sessions", concurrency, (value) => field("concurrency", value));
     }
     console.log("Summarizing sends selected, redacted history to your Pi model. Provider charges may apply.");
     console.log("Common secrets are redacted, but this is not a complete secret scanner. Pi keeps your credentials.");
@@ -95,7 +98,7 @@ export async function configureLogDig(settings, commandName = "logdig") {
     const autoCapture = await ask("Capture on Pi shutdown? (yes/no)", settings.autoCapture ? "yes" : "no", yesNo);
     installExtension = await ask("Install the Pi extension for /journal? (yes/no)", "no", yesNo);
 
-    nextSettings = { ...settings, cacheDirectory, dailyDirectory, dailyHeader, dailySummary, timeZone, sessionDirectory, piCommand, model, thinkingLevel, autoCapture };
+    nextSettings = { ...settings, cacheDirectory, dailyDirectory, dailyHeader, dailySummary, timeZone, sessionDirectory, piCommand, model, thinkingLevel, concurrency, autoCapture };
     console.log([
       "",
       "Ready to save",
@@ -107,6 +110,7 @@ export async function configureLogDig(settings, commandName = "logdig") {
       `  Pi:          ${piCommand}`,
       `  Model:       ${model || "Pi default"}`,
       `  Thinking:    ${thinkingLevel || "default (no LogDig override)"}`,
+      `  Parallel sessions: ${concurrency}`,
       `  Auto-capture: ${autoCapture ? "on" : "off"}`,
       `  Extension:   ${installExtension ? "install now" : "leave unchanged"}`,
       "Missing note and cache folders will be created on your first real backfill.",
