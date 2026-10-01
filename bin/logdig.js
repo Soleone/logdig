@@ -82,7 +82,6 @@ async function doctor() {
   const settings = await loadSettings();
   let issues = 0;
   let warnings = 0;
-  console.log("LogDig checkup (no model requests or file changes)\n");
   console.log(`Settings: ${settings.filePath}${settings.configured ? " (saved)" : " (not saved; using defaults/environment)"}`);
   const overrides = environmentOverrides();
   if (overrides.length) console.log(`Environment overrides: ${overrides.join(", ")}`);
