@@ -140,7 +140,7 @@ After a global install or `npm link`, use `logdig` from any directory. All comma
 ```text
 logdig init                         configure paths, summaries, and optional Pi integration
 logdig doctor                       check paths and Pi, with no model request
-logdig config                       show effective settings and environment overrides
+logdig config                       edit settings by number or name; q quits
 logdig --version                    show the installed version
 logdig backfill                     journal the last 3 calendar days
 logdig backfill 7 --dry-run          preview seven days without changing anything
@@ -158,7 +158,7 @@ logdig pi-install                   install the /journal extension
 logdig pi-uninstall                 remove it without deleting notes or summaries
 ```
 
-`--help` works before setup, including `logdig init --help`, `logdig backfill --help`, and `logdig status --help`.
+`--help` works before setup, including `logdig init --help`, `logdig config --help`, `logdig backfill --help`, and `logdig status --help`.
 
 `status` is a read-only coverage check. It counts work blocks: **logged** means the expected entry is present, **stale** means a previous snapshot exists but the entry needs updating, and **new** means no previous block snapshot was found. Summaries are reported separately as reusable or needing summarization. These are block counts, not exact request counts. It selects blocks by conversation activity in your configured timezone, including overnight updates and any missing continuation prerequisites. It never calls a model or writes files; scan warnings make the command exit nonzero so incomplete coverage is clear. JSON retains `sessions` as the result array, with one row per work block and both `sessionId` and `blockId`; totals use `logged`, `stale`, `new`, and `needsSummarizing`.
 
@@ -211,6 +211,16 @@ Settings contain paths and preferences, never provider credentials:
 - macOS: `~/Library/Application Support/LogDig/settings.json`
 - Windows: `%APPDATA%\LogDig\settings.json`
 
+### Change one setting
+
+Run `logdig config` in a terminal to see a numbered list of settings and current saved values. Enter a number (including `10`, `11`, or `12`) or a setting name such as `thinking` or `parallel`. Allowed values and a short explanation appear before you enter a new value. Enter keeps the current value; invalid input re-asks only that field. Each valid change saves immediately and shows the updated list. Type `q` and Enter at either prompt to exit. Ctrl+C or ending input also exits; completed saves are kept.
+
+Use `default` to clear a model or thinking override, and `none` to clear the anchor heading. Active environment overrides are labeled next to their saved preferences and are never copied into the settings file. Changing a preference does not defeat its environment override. Enabling automatic capture still requires the Pi extension (`logdig pi-install`). Configuration never requests summaries, writes notes, or creates note/cache folders. Run `init` first if those folders have not been configured.
+
+The menu uses Node's built-in line prompts with no runtime dependencies. Save confirmations follow the existing Nerd Font, `LOGDIG_ICONS=0`, and `NO_COLOR` conventions. `TERM=dumb` uses plain prompts. When input or output is redirected, `config` stays read-only and shows effective settings as formatted JSON with the settings path and override names, as before. For example: `logdig config > settings-report.txt`.
+
+### Journal preferences
+
 `dailyHeader` selects the section for project entries (default `# Projects`). The optional `dailyHeaderAnchor` selects where to create that section:
 
 ```json
@@ -220,17 +230,17 @@ Settings contain paths and preferences, never provider credentials:
 }
 ```
 
-This inserts a new Projects section after the entire Log section, including its subheadings, and before the next same-level or higher-level heading. Use the same heading level for both settings to keep the sections as siblings. The anchor must be one Markdown heading, including its `#` level, and matches the first occurrence outside frontmatter and fenced code. The default is `""` (blank): append at the end of the note. A missing anchor also falls back to the end. Existing Projects sections stay where they are; this setting does not relocate them or regenerate summaries. Run `init` to set the anchor or choose `none` to clear it. `PI_JOURNAL_DAILY_HEADER_ANCHOR` overrides the saved setting, including an empty value to clear it.
+This inserts a new Projects section after the entire Log section, including its subheadings, and before the next same-level or higher-level heading. Use the same heading level for both settings to keep the sections as siblings. The anchor must be one Markdown heading, including its `#` level, and matches the first occurrence outside frontmatter and fenced code. The default is `""` (blank): append at the end of the note. A missing anchor also falls back to the end. Existing Projects sections stay where they are; this setting does not relocate them or regenerate summaries. Run `config` to edit the anchor or choose `none` to clear it. `PI_JOURNAL_DAILY_HEADER_ANCHOR` overrides the saved setting, including an empty value to clear it.
 
 Backfill and automatic capture process up to **four independent sessions concurrently** by default. Set `concurrency` in the settings file or choose “Maximum parallel sessions” in setup's advanced settings. It must be a positive integer; use `1` for sequential processing or to reduce provider rate-limit pressure. Work blocks and extraction requests within each session remain sequential to preserve continuation links. Shared daily-note updates are serialized to avoid overwriting entries. CLI result rows appear in session order even when parallel sessions finish out of order. Session numbers are zero-padded to match the total, for example `[01/65]`, followed by the date, a fixed-width status column, project, and short session ID. Each work period has one final result row; resumed sessions can have multiple dated rows with the same session number. In interactive terminals, a bounded live panel below the permanent results shows active workers (`CHECKING` or `SUMMARIZING`), the completed-session count, and sessions that are `DONE` but awaiting ordered output. The panel redraws in place and clears when the run finishes. A slow earlier session can delay display of later result rows, but does not block processing or live feedback. Redirected output and `TERM=dumb` use plain `Active` and `Finished` log lines instead of cursor controls. Dry-run output stays static. Blocks outside the selected range that are needed for continuation links are marked `prerequisite`. The final checked count distinguishes work blocks from sessions. Status reports retain chronological session order. Changing concurrency does not invalidate cached summaries. Avoid running separate LogDig commands against the same notes at the same time; the write queue is local to one run.
 
 Set `LOGDIG_CONFIG_PATH` to choose another settings file. Existing `PI_JOURNAL_*` environment variables remain supported and override saved values. Setup, `config`, and `doctor` name active overrides so you can see why a saved preference is not taking effect.
 
 - **No saved history found:** create a saved Pi session, or use setup's advanced settings to select your history folder. This is especially useful with a custom Pi session directory.
-- **Notes went to the wrong folder:** run `config`, check environment overrides, then run `init` to choose the daily-notes folder rather than the vault root.
-- **Pi cannot start:** run `doctor`, then use setup's advanced settings to set the executable path.
+- **Notes went to the wrong folder:** run `config`, check environment overrides, and edit the daily-notes folder rather than the vault root.
+- **Pi cannot start:** run `doctor`, then use `config` to set the executable path.
 - **A summary or note failed:** read the error, fix the path, permissions, authentication, or provider issue, and rerun. Successful cached work is kept.
-- **Want to stop automatic capture:** rerun `init` and choose “no”, or set `PI_JOURNAL_AUTO=0`.
+- **Want to stop automatic capture:** run `config` and set automatic capture to `no`, or set `PI_JOURNAL_AUTO=0`.
 
 ## Development
 

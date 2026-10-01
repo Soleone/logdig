@@ -49,7 +49,7 @@ function defaults({ env = process.env, home = homedir() } = {}) {
     sessionDirectory: path.join(expandPath(agentDirectory, home), "sessions"),
     piCommand: "pi",
     concurrency: DEFAULT_CONCURRENCY,
-    autoCapture: env.PI_JOURNAL_AUTO === "1",
+    autoCapture: false,
   };
 }
 
@@ -135,6 +135,12 @@ export function environmentOverrides(env = process.env) {
     .filter((variable) => env[variable] !== undefined && (env[variable] !== "" || variable === "PI_JOURNAL_AUTO" || variable === "PI_JOURNAL_DAILY_HEADER_ANCHOR"));
 }
 
+export function environmentOverrideFor(key, env = process.env) {
+  const variable = [...ENVIRONMENT_SETTINGS, ["PI_JOURNAL_AUTO", "autoCapture"]]
+    .find(([, setting]) => setting === key)?.[0];
+  return environmentOverrides(env).includes(variable) ? variable : undefined;
+}
+
 export async function loadSettings(options = {}) {
   const env = options.env || process.env;
   const home = options.home || homedir();
@@ -154,10 +160,12 @@ export async function loadSettings(options = {}) {
   }
 
   const settings = { ...defaults({ env, home }), ...stored };
-  for (const [variable, key] of ENVIRONMENT_SETTINGS) {
-    if (env[variable] !== undefined && (env[variable] !== "" || key === "dailyHeaderAnchor")) settings[key] = env[variable];
+  if (options.applyEnvironment !== false) {
+    for (const [variable, key] of ENVIRONMENT_SETTINGS) {
+      if (env[variable] !== undefined && (env[variable] !== "" || key === "dailyHeaderAnchor")) settings[key] = env[variable];
+    }
+    if (env.PI_JOURNAL_AUTO !== undefined) settings.autoCapture = env.PI_JOURNAL_AUTO === "1" || env.PI_JOURNAL_AUTO === "true";
   }
-  if (env.PI_JOURNAL_AUTO !== undefined) settings.autoCapture = env.PI_JOURNAL_AUTO === "1" || env.PI_JOURNAL_AUTO === "true";
   validateSettings(settings);
   return { ...settings, filePath, configured };
 }

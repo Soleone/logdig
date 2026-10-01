@@ -26,6 +26,8 @@ In the wizard:
 
 Press Enter to accept defaults. A typo only re-asks that question. Review the choices before saving. Ctrl+C or declining confirmation leaves your settings unchanged. Setup writes settings only, not summaries or daily notes.
 
+To change a setting later, run `logdig config`. Choose its number or type a name such as `thinking`, then enter the new value. Available choices are shown first. Enter keeps the current value; each valid change saves immediately and refreshes the list. Type `q` and Enter to exit. Environment overrides are labeled and still take precedence. Redirected output stays read-only.
+
 ## 2. Check and preview
 
 ```sh

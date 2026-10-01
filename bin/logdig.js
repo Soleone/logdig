@@ -9,6 +9,7 @@ import { spawnPiProcess } from "../src/pi-process.js";
 import { environmentOverrides, loadSettings, validateSettings } from "../src/settings.js";
 import { checkDirectory } from "../src/directories.js";
 import { configureLogDig } from "../src/setup.js";
+import { editConfig } from "../src/config-menu.js";
 import { statusPrefix, statusPrefixWidth } from "../src/cli-status.js";
 import { createBackfillProgress } from "../src/backfill-progress.js";
 
@@ -72,6 +73,7 @@ function runPiCommand(command, args, { cwd = process.cwd(), inherit = false, tim
 }
 
 async function showConfig() {
+  if (process.stdin.isTTY && process.stdout.isTTY) return editConfig(commandName);
   const settings = await loadSettings();
   const { filePath, configured, ...values } = settings;
   console.log(`Settings: ${filePath}${configured ? "" : " (not created yet)"}`);
@@ -381,7 +383,7 @@ function helpText() {
     "Commands (install with 'npm install -g logdig', or use 'npm link' in a checkout):",
     "  logdig init                         guided setup; nothing is summarized",
     "  logdig doctor                       check paths and Pi without a model request",
-    "  logdig config                       show settings and active environment overrides",
+    "  logdig config                       edit numbered settings; q quits (redirected: read-only)",
     "  logdig backfill [N|all] [--dry-run] [--skip-today]",
     "                                      [--model provider/model|default]",
     "                                      [--thinking default|off|minimal|low|medium|high|xhigh|max]",
@@ -457,5 +459,5 @@ async function main() {
 
 main().catch((error) => {
   console.error(`logdig: ${error.message}`);
-  process.exitCode = error.code === "LOGDIG_SETUP_CANCELLED" ? 130 : 1;
+  process.exitCode = ["LOGDIG_SETUP_CANCELLED", "LOGDIG_CONFIG_CANCELLED"].includes(error.code) ? 130 : 1;
 });

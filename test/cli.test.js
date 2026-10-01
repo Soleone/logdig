@@ -119,6 +119,19 @@ test("CLI help and subcommand help work before setup without writing settings", 
   assert.deepEqual(await calls(w.callsPath), []);
 });
 
+test("redirected config remains read-only even when given menu input", async (t) => {
+  const w = await workspace(t);
+  const before = await readFile(w.filePath, "utf8");
+  const result = await runCli(["config"], { ...w.env, PI_JOURNAL_DAILY_SUMMARY: "large" }, { input: "11\n2\nq\n" });
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /"dailySummary": "large"/);
+  assert.match(result.stdout, /"concurrency": 4/);
+  assert.match(result.stdout, /Environment overrides: PI_JOURNAL_DAILY_SUMMARY/);
+  assert.doesNotMatch(result.stdout, /Choose a setting|New value|saved:/);
+  assert.equal(await readFile(w.filePath, "utf8"), before);
+  assert.deepEqual(await calls(w.callsPath), []);
+});
+
 test("setup explains choices and recovers locally from invalid paths, headings, summaries, timezone, model, thinking, concurrency, and yes/no input", async (t) => {
   const w = await workspace(t, { configured: false });
   const notAFolder = path.join(w.root, "a-file.md");
