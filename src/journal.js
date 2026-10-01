@@ -370,7 +370,10 @@ export async function saveSessionSummary(modelClient, cacheDirectory, session, {
   const summary = await summarizeSession(modelClient, session, (usage) => usages.push(usage));
   const logMetrics = sessionMetrics({ header: {}, entries: usages.map((usage) => ({ type: "usage", usage })) });
   logMetrics.durationSeconds = Math.round((Date.now() - started) / 1000);
-  const markdown = renderSessionNote({ ...session, sourceFingerprint: cached.sourceFingerprint }, summary, cacheFingerprint, modelClient.modelLabel || "Pi default", logMetrics);
+  const model = modelClient.modelLabel || "Pi default";
+  const thinkingLevel = modelClient.cachePolicy?.thinkingLevel;
+  const modelWithThinking = thinkingLevel === undefined ? model : `${model}:${thinkingLevel}`;
+  const markdown = renderSessionNote({ ...session, sourceFingerprint: cached.sourceFingerprint }, summary, cacheFingerprint, modelWithThinking, logMetrics);
   await writeAtomically(sessionPath, markdown);
   return { ...cached, summary, continuationOf: session.continuationOf, reused: false };
 }

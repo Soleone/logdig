@@ -28,6 +28,7 @@ test("session cache stores all three layers and round-trips its metadata", () =>
   assert.equal(parsed.time, "10:25");
   assert.equal(parsed.sessionId, "01-session");
   assert.equal(parsed.project, "demo");
+  assert.equal(parsed.model, "test/fake");
   assert.equal(parsed.sourceFingerprint, "source-123");
   assert.equal(parsed.cacheFingerprint, "cache-123");
   assert.deepEqual(parsed.summary, summary);
@@ -61,6 +62,20 @@ test("session and LogDig usage render as separate compact frontmatter strings", 
   assert.deepEqual(parseSessionNote(enriched).summary, summary);
   assert.equal(enrichSessionNote(enriched, session.sourceFingerprint, {}), enriched);
   assert.equal(enrichSessionNote(oldNote, "different source", {}), oldNote);
+});
+
+test("generated frontmatter appends an explicit thinking level to the model label", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "logdig-thinking-frontmatter-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const modelClient = {
+    modelLabel: "test/fake",
+    cachePolicy: { model: "test/fake", thinkingLevel: "high" },
+    complete: async () => JSON.stringify(summary),
+  };
+
+  const result = await saveSessionSummary(modelClient, root, session);
+  const note = parseSessionNote(await readFile(result.sessionPath, "utf8"));
+  assert.equal(note.model, "test/fake:high");
 });
 
 test("large session evidence is summarized in bounded chunks before final layers", async (t) => {
