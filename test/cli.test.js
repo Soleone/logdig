@@ -514,7 +514,7 @@ test("real CLI backfill preserves handwritten notes, gives progress, and repeats
   assert.match(first.stdout, /^Active \[1\/1\].*SUMMARIZING/m);
   assert.doesNotMatch(first.stdout, /CHECKING|block 1\/1|\x1b/);
   assert.match(first.stdout, /Checked: 1 work block across 1 session\./);
-  assert.match(first.stdout, /a slow session can delay later rows/);
+  assert.match(first.stdout, /Finished results wait to print until earlier sessions finish; other sessions keep processing/);
   assert.match(first.stdout, /Saved: 1 summary created/);
   const daily = await readFile(dailyPath, "utf8");
   for (const text of ["Personal writing stays here.", "A handwritten log.", "# Tomorrow\n\nDon't lose this."]) assert.ok(daily.includes(text));

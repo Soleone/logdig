@@ -30,6 +30,7 @@ export function createBackfillProgress({ total, concurrency, dryRun = false, str
   let nextResult = 0;
   let completed = 0;
   let panelRows = 0;
+  let refreshTimer;
   let closed = false;
 
   function clearPanel() {
@@ -38,24 +39,44 @@ export function createBackfillProgress({ total, concurrency, dryRun = false, str
     panelRows = 0;
   }
 
-  function sessionLabel(event, status = event.status) {
+  function sessionLabel(event, status = event.status, elapsed = "") {
     const position = `${String(event.index).padStart(String(total).length, "0")}/${total}`;
     const timestamp = `${cleanText(event.date)}${event.time ? ` ${cleanText(event.time)}` : ""}`.padEnd(16);
-    return `[${position}] ${timestamp} · ${progressStatus(status, statusOptions)} · ${cleanText(event.project) || "session"} (${cleanText(event.sessionId).slice(-8)})`;
+    return `[${position}] ${timestamp} · ${progressStatus(status, statusOptions)} · ${elapsed ? `${elapsed} · ` : ""}${cleanText(event.project) || "session"} (${cleanText(event.sessionId).slice(-8)})`;
   }
 
   function renderPanel() {
     if (!live || closed) return;
     clearPanel();
     const pending = sessions.slice(nextResult).filter((session) => session.event);
-    if (!pending.length) return;
     const waiting = pending.filter((session) => session.complete);
     const active = pending.filter((session) => !session.complete);
-    const capacity = Math.max(0, Math.min(concurrency, (stream.rows || 24) - 3));
-    const lines = [
-      `Completed: ${completed}/${total} sessions${waiting.length ? ` · ${waiting.length} awaiting ordered output` : ""}`,
-      ...[...active, ...waiting].slice(0, capacity).map((session) => sessionLabel(session.event, session.complete ? session.failed ? "FAILED" : "DONE" : session.event.status)),
-    ];
+    if (active.length && !refreshTimer) {
+      refreshTimer = setInterval(renderPanel, 1000);
+      refreshTimer.unref();
+    } else if (!active.length && refreshTimer) {
+      clearInterval(refreshTimer);
+      refreshTimer = undefined;
+    }
+    if (!pending.length) return;
+    const queued = total - completed - active.length;
+    const overhead = 1 + Number(active.length > 0) + Number(waiting.length > 0);
+    const capacity = Math.max(0, Math.min(concurrency, (stream.rows || 24) - 2 - overhead));
+    const lines = [`Progress: ${completed}/${total} complete · ${active.length} active · ${queued} queued`];
+    if (active.length) {
+      const hidden = Math.max(0, active.length - capacity);
+      lines.push(`Active sessions (stage elapsed${hidden ? `; ${hidden} not shown` : ""}):`);
+      for (const session of active.slice(0, capacity)) {
+        const seconds = Math.max(0, Math.floor((Date.now() - session.stageStartedAt) / 1000));
+        const elapsed = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+        lines.push(sessionLabel(session.event, session.event.status, elapsed));
+      }
+    }
+    if (waiting.length) {
+      const blocker = String(nextResult + 1).padStart(String(total).length, "0");
+      const failed = waiting.filter((session) => session.failed).length;
+      lines.push(`${waiting.length} finished session${waiting.length === 1 ? "" : "s"} waiting to print after #${blocker}.${failed ? ` ${failed} with errors.` : ""}`);
+    }
     stream.write(lines.map((line) => fitLiveLine(line, stream.columns || 80)).join("\n") + "\n");
     panelRows = lines.length;
   }
@@ -63,6 +84,10 @@ export function createBackfillProgress({ total, concurrency, dryRun = false, str
   function onProgress(event) {
     if (closed) return;
     const session = sessions[event.index - 1];
+    const previous = session.event;
+    if (!previous || previous.phase !== event.phase || previous.blockId !== event.blockId || previous.date !== event.date || previous.time !== event.time) {
+      session.stageStartedAt = Date.now();
+    }
     session.event = event;
     if (event.phase === "error") session.failed = true;
     if (["complete", "skipped", "error"].includes(event.phase)) {
@@ -85,7 +110,8 @@ export function createBackfillProgress({ total, concurrency, dryRun = false, str
     completed++;
     clearPanel();
     if (!live && !dryRun && index - 1 > nextResult) {
-      stream.write(`Finished ${sessionLabel(session.event, session.failed ? "FAILED" : "DONE")} (waiting for earlier results)\n`);
+      const blocker = String(nextResult + 1).padStart(String(total).length, "0");
+      stream.write(`Finished ${sessionLabel(session.event, session.failed ? "FAILED" : "DONE")} (waiting to print after #${blocker}; processing continues)\n`);
     }
     while (sessions[nextResult]?.complete) {
       const { lines } = sessions[nextResult];
@@ -100,6 +126,8 @@ export function createBackfillProgress({ total, concurrency, dryRun = false, str
     if (closed) return;
     clearPanel();
     closed = true;
+    clearInterval(refreshTimer);
+    refreshTimer = undefined;
     if (live) stream.removeListener("resize", renderPanel);
   }
 

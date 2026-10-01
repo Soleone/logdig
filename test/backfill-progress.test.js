@@ -49,18 +49,19 @@ function fixture(options = {}) {
   return { stream, progress };
 }
 
-test("live rows change in place from active to waiting, then become ordered permanent results", () => {
+test("live panel separates active workers from finished sessions waiting to print", () => {
   const { stream, progress } = fixture();
   progress.onProgress(event(1));
   progress.onProgress(event(2));
-  assert.match(stream.screen(), /Completed: 0\/2 sessions/);
-  assert.match(stream.screen(), /SUMMARIZING · project-1/);
-  assert.match(stream.screen(), /SUMMARIZING · project-2/);
+  assert.match(stream.screen(), /Progress: 0\/2 complete · 2 active · 0 queued/);
+  assert.match(stream.screen(), /Active sessions \(stage elapsed\):/);
+  assert.match(stream.screen(), /SUMMARIZING · 0s · project-1/);
+  assert.match(stream.screen(), /SUMMARIZING · 0s · project-2/);
   progress.onProgress(event(2, "UPDATED"));
   progress.onSessionComplete({ index: 2 });
-  assert.match(stream.screen(), /Completed: 1\/2 sessions · 1 awaiting ordered output/);
-  assert.match(stream.screen(), /DONE\s+· project-2/);
-  assert.doesNotMatch(stream.screen(), /UPDATED/);
+  assert.match(stream.screen(), /Progress: 1\/2 complete · 1 active · 0 queued/);
+  assert.match(stream.screen(), /1 finished session waiting to print after #1\./);
+  assert.doesNotMatch(stream.screen(), /DONE|UPDATED|project-2|ordered output/);
   progress.onProgress(event(1, "SAVED"));
   progress.onSessionComplete({ index: 1 });
   assert.equal(stream.screen(), "[1/2] 2026-10-01 12:00 · SAVED       · project-1 (ession-1)\n[2/2] 2026-10-01 12:00 · UPDATED     · project-2 (ession-2)");
@@ -68,7 +69,7 @@ test("live rows change in place from active to waiting, then become ordered perm
   progress.close();
 });
 
-test("panel remains bounded and prioritizes active workers over buffered completions", () => {
+test("panel shows queued work and no buffered result rows", () => {
   const { stream, progress } = fixture({ total: 8, concurrency: 4 });
   progress.onProgress(event(1));
   for (let index = 2; index <= 5; index++) {
@@ -78,24 +79,94 @@ test("panel remains bounded and prioritizes active workers over buffered complet
   progress.onProgress(event(6));
   progress.onProgress(event(7));
   const lines = stream.screen().split("\n");
-  assert.equal(lines.length, 5);
-  assert.match(lines[0], /Completed: 4\/8 sessions · 4 awaiting ordered output/);
-  for (const index of [1, 6, 7]) assert.ok(lines.some((line) => line.includes(`SUMMARIZING · project-${index}`)));
-  assert.equal(lines.filter((line) => line.includes("DONE")).length, 1);
+  assert.equal(lines.length, 6);
+  assert.match(lines[0], /Progress: 4\/8 complete · 3 active · 1 queued/);
+  for (const index of [1, 6, 7]) assert.ok(lines.some((line) => line.includes(`SUMMARIZING · 0s · project-${index}`)));
+  assert.match(lines.at(-1), /4 finished sessions waiting to print after #1\./);
+  assert.doesNotMatch(stream.screen(), /DONE|project-[2-5]/);
+  progress.close();
+});
+
+test("finishing the blocker prints through the next unfinished session", () => {
+  const { stream, progress } = fixture({ total: 30, concurrency: 8 });
+  progress.onProgress(event(1));
+  progress.onProgress(event(7));
+  for (const index of [2, 3, 4, 5, 6, 8]) {
+    progress.onProgress(event(index, "SAVED"));
+    progress.onSessionComplete({ index });
+  }
+  assert.match(stream.screen(), /6 finished sessions waiting to print after #01\./);
+  progress.onProgress(event(1, "SAVED"));
+  progress.onSessionComplete({ index: 1 });
+  const printed = stream.screen().split("\n").filter((line) => line.includes("SAVED"));
+  assert.deepEqual(printed.map((line) => line.slice(0, 8)), ["[01/30] ", "[02/30] ", "[03/30] ", "[04/30] ", "[05/30] ", "[06/30] "]);
+  assert.match(stream.screen(), /Progress: 7\/30 complete · 1 active · 22 queued/);
+  assert.match(stream.screen(), /1 finished session waiting to print after #07\./);
+  assert.doesNotMatch(stream.screen(), /project-8/);
+  progress.close();
+});
+
+test("elapsed times refresh while the model is silent, reset for a new stage, and stop on close", (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: 1000 });
+  const { stream, progress } = fixture();
+  progress.onProgress(event(1, "CHECKING", { phase: "checking" }));
+  t.mock.timers.tick(2000);
+  assert.match(stream.screen(), /CHECKING\s+· 2s · project-1/);
+  progress.onProgress(event(1));
+  assert.match(stream.screen(), /SUMMARIZING · 0s · project-1/);
+  t.mock.timers.tick(62000);
+  assert.match(stream.screen(), /SUMMARIZING · 1m 2s · project-1/);
+  progress.onProgress(event(1));
+  assert.match(stream.screen(), /SUMMARIZING · 1m 2s · project-1/);
+  progress.onProgress(event(1, "SUMMARIZING", { blockId: "next-block" }));
+  assert.match(stream.screen(), /SUMMARIZING · 0s · project-1/);
+  progress.close();
+  const output = stream.output;
+  t.mock.timers.tick(5000);
+  assert.equal(stream.output, output);
+  assert.equal(stream.screen(), "");
+});
+
+test("finishing all sessions stops timed redraws before close", (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: 1000 });
+  const { stream, progress } = fixture({ total: 1, concurrency: 1 });
+  progress.onProgress(event(1));
+  progress.onProgress(event(1, "SAVED"));
+  progress.onSessionComplete({ index: 1 });
+  const output = stream.output;
+  t.mock.timers.tick(5000);
+  assert.equal(stream.output, output);
+  progress.close();
+});
+
+test("short terminals bound active rows and report workers not shown", () => {
+  const { stream, progress } = fixture({ total: 10, concurrency: 8, stream: { rows: 8 } });
+  for (let index = 1; index <= 7; index++) progress.onProgress(event(index));
+  progress.onProgress(event(9, "SAVED"));
+  progress.onSessionComplete({ index: 9 });
+  progress.onProgress(event(8));
+  assert.equal(stream.screen().split("\n").length, 6);
+  assert.match(stream.screen(), /Progress: 1\/10 complete · 8 active · 1 queued/);
+  assert.match(stream.screen(), /Active sessions \(stage elapsed; 5 not shown\):/);
+  assert.match(stream.screen(), /1 finished session waiting to print after #01\./);
+  stream.rows = 24;
+  stream.emit("resize");
+  assert.match(stream.screen(), /project-8/);
+  assert.doesNotMatch(stream.screen(), /not shown/);
   progress.close();
 });
 
 test("a resumed session only finishes after its last block and preserves both dated results", () => {
   const { stream, progress } = fixture({ total: 1, concurrency: 1 });
   progress.onProgress(event(1, "SAVED", { date: "2026-09-30" }));
-  assert.match(stream.screen(), /Completed: 0\/1 sessions/);
+  assert.match(stream.screen(), /Progress: 0\/1 complete · 1 active · 0 queued/);
   progress.onProgress(event(1));
   assert.match(stream.screen(), /2026-10-01.*SUMMARIZING/);
   assert.doesNotMatch(stream.screen(), /2026-09-30|DONE/);
   progress.onProgress(event(1, "UPDATED"));
   progress.onSessionComplete({ index: 1 });
   assert.match(stream.screen(), /2026-09-30.*SAVED.*\n.*2026-10-01.*UPDATED/);
-  assert.doesNotMatch(stream.screen(), /Completed:|SUMMARIZING/);
+  assert.doesNotMatch(stream.screen(), /Progress:|SUMMARIZING|Active sessions/);
   progress.close();
 });
 
@@ -107,18 +178,18 @@ test("failures and skipped sessions advance ordered results without leaving a pa
   progress.onProgress(event(1, "FAILED", { phase: "error", error: "model failed" }));
   progress.onSessionComplete({ index: 1 });
   assert.match(stream.screen(), /^\[1\/2\].*FAILED.*model failed\n\[2\/2\].*SKIPPED.*outside date range$/);
-  assert.doesNotMatch(stream.screen(), /Completed:/);
+  assert.doesNotMatch(stream.screen(), /Progress:/);
   progress.close();
 });
 
-test("a failed block remains visibly failed while its session waits, even if a later block succeeds", () => {
+test("buffered sessions with errors stay visible even if a later block succeeds", () => {
   const { stream, progress } = fixture();
   progress.onProgress(event(1));
   progress.onProgress(event(2, "FAILED", { phase: "error", error: "failed earlier block" }));
   progress.onProgress(event(2, "SAVED"));
   progress.onSessionComplete({ index: 2 });
-  assert.match(stream.screen(), /FAILED\s+· project-2/);
-  assert.doesNotMatch(stream.screen(), /DONE/);
+  assert.match(stream.screen(), /1 finished session waiting to print after #1\. 1 with errors\./);
+  assert.doesNotMatch(stream.screen(), /DONE|project-2/);
   progress.close();
 });
 
@@ -129,11 +200,11 @@ for (const options of [{ stream: { isTTY: false } }, { term: "dumb" }]) {
     progress.onProgress(event(2, "CURRENT"));
     progress.onSessionComplete({ index: 2 });
     assert.match(stream.output, /^Active \[1\/2\].*SUMMARIZING/m);
-    assert.match(stream.output, /Finished \[2\/2\].*DONE.*waiting for earlier results/);
+    assert.match(stream.output, /Finished \[2\/2\].*DONE.*waiting to print after #1; processing continues/);
     progress.onProgress(event(1, "SAVED"));
     progress.onSessionComplete({ index: 1 });
     assert.match(stream.output, /\n\[1\/2\].*SAVED.*\n\[2\/2\].*CURRENT/);
-    assert.doesNotMatch(stream.output, /\x1b|Completed:/);
+    assert.doesNotMatch(stream.output, /\x1b|Progress:|stage elapsed/);
     progress.close();
   });
 }
@@ -146,7 +217,7 @@ test("preview output remains static and its paths stay with the ordered result",
   progress.onProgress(event(1, "SKIPPED", { phase: "skipped" }));
   progress.onSessionComplete({ index: 1 });
   assert.match(stream.output, /\[1\/2\].*SKIPPED.*\n\[2\/2\].*PREVIEW.*prerequisite\n  Daily note: \/daily\/2.md\n  Full summary: \/cache\/2.md/);
-  assert.doesNotMatch(stream.output, /\x1b|Active |Finished |Completed:/);
+  assert.doesNotMatch(stream.output, /\x1b|Active |Finished |Progress:/);
   progress.close();
 });
 

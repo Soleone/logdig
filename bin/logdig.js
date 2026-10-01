@@ -198,7 +198,7 @@ async function backfill(args) {
 
   console.log("Results are shown in session order; processing remains parallel.");
   console.log("One result per work period; resumed sessions may have multiple dated rows.");
-  if (!dryRun) console.log("Summarizing new or changed work may take a few minutes; a slow session can delay later rows.");
+  if (!dryRun) console.log("Summarizing may take a few minutes. Finished results wait to print until earlier sessions finish; other sessions keep processing.");
   console.log();
   const progress = createBackfillProgress({ total: found.sessions.length, concurrency: settings.concurrency, dryRun });
   const interrupt = () => { cleanupProgress(); process.kill(process.pid, "SIGINT"); };
