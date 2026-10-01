@@ -82,29 +82,35 @@ async function doctor() {
   const settings = await loadSettings();
   let issues = 0;
   let warnings = 0;
-  console.log(`Settings: ${settings.filePath}${settings.configured ? " (saved)" : " (not saved; using defaults/environment)"}`);
-  const overrides = environmentOverrides();
-  if (overrides.length) console.log(`Environment overrides: ${overrides.join(", ")}`);
-
-  for (const [label, directory, writable] of [
+  const checks = [
     ["Session history", settings.sessionDirectory, false],
     ["Summary cache", settings.cacheDirectory, true],
     ["Daily notes", settings.dailyDirectory, true],
-  ]) {
+  ];
+  const statusWidth = "OK    ".length;
+  const labelWidth = Math.max(...checks.map(([label]) => label.length), "Pi".length);
+  const valueColumn = statusWidth + labelWidth + 2;
+  const formatLabel = (label, prefixWidth = statusWidth) => `${label}:${" ".repeat(valueColumn - prefixWidth - label.length - 1)}`;
+
+  console.log(`OK    ${formatLabel("Settings")}${settings.filePath}${settings.configured ? " (saved)" : " (not saved; using defaults/environment)"}`);
+  const overrides = environmentOverrides();
+  if (overrides.length) console.log(`Environment overrides: ${overrides.join(", ")}`);
+
+  for (const [label, directory, writable] of checks) {
     if (!directory) {
-      console.error(`FIX   ${label}: not configured. Run '${commandName} init' to choose a folder.`);
+      console.error(`FIX   ${formatLabel(label)}not configured. Run '${commandName} init' to choose a folder.`);
       issues++;
       continue;
     }
     try {
       const result = await checkDirectory(directory, { writable, allowMissing: writable });
-      console.log(`OK    ${label}: ${directory}${result.exists ? "" : " (will be created on a real backfill)"}`);
+      console.log(`OK    ${formatLabel(label)}${directory}${result.exists ? "" : " (will be created on a real backfill)"}`);
     } catch (error) {
       if (label === "Session history" && error.code === "ENOENT") {
-        console.warn(`WARN  ${label}: ${directory} (not found yet). Start a saved Pi session, or choose its location with '${commandName} init'.`);
+        console.warn(`WARN  ${formatLabel(label)}${directory} (not found yet). Start a saved Pi session, or choose its location with '${commandName} init'.`);
         warnings++;
       } else {
-        console.error(`FIX   ${label}: ${directory} (${error.message}). Check folder permissions or choose another folder with '${commandName} init'.`);
+        console.error(`FIX   ${formatLabel(label)}${directory} (${error.message}). Check folder permissions or choose another folder with '${commandName} init'.`);
         issues++;
       }
     }
@@ -112,9 +118,9 @@ async function doctor() {
 
   try {
     const pi = await runPiCommand(settings.piCommand, ["--version", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--offline"]);
-    console.log(`OK    Pi: ${pi.stdout || pi.stderr || "available"}`);
+    console.log(`OK    ${formatLabel("Pi")}${pi.stdout || pi.stderr || "available"}`);
   } catch (error) {
-    console.error(`FIX   Pi: ${error.message}. Install Pi or set its executable in '${commandName} init' (advanced settings).`);
+    console.error(`FIX   ${formatLabel("Pi")}${error.message}. Install Pi or set its executable in '${commandName} init' (advanced settings).`);
     issues++;
   }
   console.log(`\nSummary model: ${settings.model || "Pi startup default"}`);

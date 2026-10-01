@@ -208,6 +208,16 @@ test("doctor validates missing folders through their parents without creating th
   const result = await runCli(["doctor"], w.env);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /will be created on a real backfill/);
+  const checkLines = result.stdout.split("\n").filter((line) => /^(?:OK    |WARN  |FIX   )/.test(line));
+  const detailColumns = checkLines.map((line) => {
+    const colon = line.indexOf(":");
+    return colon + 1 + line.slice(colon + 1).match(/^ */)[0].length;
+  });
+  const settingsLine = result.stdout.split("\n").find((line) => line.startsWith("OK    Settings:"));
+  const settingsColon = settingsLine.indexOf(":");
+  detailColumns.push(settingsColon + 1 + settingsLine.slice(settingsColon + 1).match(/^ */)[0].length);
+  assert.equal(new Set(detailColumns).size, 1);
+  assert.match(result.stdout, /^OK    Summary cache:/m);
   assert.match(result.stdout, /Checks passed/);
   assert.deepEqual((await calls(w.callsPath)).map((args) => args[0]), ["--version"]);
   await assert.rejects(readdir(w.settings.dailyDirectory), { code: "ENOENT" });
