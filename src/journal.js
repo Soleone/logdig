@@ -566,19 +566,13 @@ function appendUnderProject(markdown, heading, entry) {
     lineStart = newline + 1;
   }
 
-  const text = dailyEntryText(entry, heading, projectEntries.length === 0);
+  const text = dailyEntryText(entry, heading);
   if (sectionStart === -1) {
     const separator = !markdown ? "" : markdown.endsWith("\n\n") ? "" : markdown.endsWith("\n") ? "\n" : "\n\n";
     return `${markdown}${separator}${heading}\n\n${projectHeading}\n\n${text}\n`;
   }
 
   if (projectStart === -1) return addEntryAt(markdown, sectionEnd, `${projectHeading}\n\n${text}`);
-  for (const timestamp of projectEntries) {
-    if (!timestamp.inline) continue;
-    const separator = timestamp.start + timestamp.header.length;
-    // Both separators are two characters, so recorded insertion offsets remain valid.
-    markdown = `${markdown.slice(0, separator)}\n\n${markdown.slice(separator + 2)}`;
-  }
   return addEntryAt(markdown, nextTimestamp ?? projectEnd ?? sectionEnd, text);
 }
 
@@ -594,13 +588,13 @@ function formatDailySummary(summary) {
     .join("\n").trim();
 }
 
-function dailyEntryText(entry, heading, inline) {
+function dailyEntryText(entry, heading) {
   const id = dailyEntryId(entry, heading);
   // Daily notes stay section-safe; structured detail lives in the linked snapshot.
   const blurb = entry.summaryOverride ?? formatDailySummary(entry.summary);
   const summary = `${blurb}${entry.continuationOf ? `\n\nContinues [[${entry.continuationOf}|previous entry]].` : ""}`;
   const timestamp = `**[[${id}|${entry.time}]]**`;
-  return inline ? `${timestamp}: ${summary}` : `${timestamp}\n\n${summary}`;
+  return `${timestamp}: ${summary}`;
 }
 
 async function sessionEntryLocations(dailyDirectory, heading, entry, existing, journaledEntries) {

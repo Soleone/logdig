@@ -31,7 +31,7 @@ test("a singleton puts its timestamp inline and repeat saves leave the note unch
   assert.equal(await readFile(dailyPath, "utf8"), text);
 });
 
-test("adding a second entry expands the existing singleton without changing its edited summary or neighbors", async (t) => {
+test("multiple entries keep timestamps inline without changing edited summaries or neighbors", async (t) => {
   for (const time of ["09:00", "12:00"]) {
     const { daily, entry, dailyPath } = await workspace(t);
     const personal = "# Log\n\nMy personal log.\n\n";
@@ -47,9 +47,9 @@ test("adding a second entry expands the existing singleton without changing its 
     assert.ok(updated.startsWith(personal));
     assert.equal(updated.slice(updated.indexOf("## beta")), beta);
     const alpha = updated.slice(updated.indexOf("## alpha"), updated.indexOf("## beta"));
-    assert.equal((alpha.match(/^\*\*\[\[[a-f0-9]{64}\|\d{2}:\d{2}\]\]\*\*$/gm) || []).length, 2);
-    assert.ok(!/^\*\*\[\[.*\]\]\*\*: /m.test(alpha));
-    assert.ok(alpha.includes("|11:00]]**\n\nHuman-edited paragraph.\n\nSecond paragraph."));
+    assert.equal((alpha.match(/^\*\*\[\[[a-f0-9]{64}\|\d{2}:\d{2}\]\]\*\*: /gm) || []).length, 2);
+    assert.ok(!/^\*\*\[\[.*\]\]\*\*\n\n/m.test(alpha));
+    assert.ok(alpha.includes("|11:00]]**: Human-edited paragraph.\n\nSecond paragraph."));
     const times = [...alpha.matchAll(/\[\[[a-f0-9]{64}\|(\d{2}:\d{2})\]\]/g)].map((match) => match[1]);
     assert.deepEqual(times, ["11:00", time].sort());
     assert.equal((await inspectDailyEntry(daily, "# Projects", entry)).appended, false);
@@ -134,8 +134,8 @@ test("same-time entries stay stable and special project names reuse their group"
   }
   const text = await readFile(dailyPath, "utf8");
   assert.equal((text.match(/^## a&#91;b&#93;&#124;c$/gm) || []).length, 1);
-  assert.ok(text.indexOf("\n\none\n") < text.indexOf("\n\ntwo\n"));
-  assert.ok(text.indexOf("\n\ntwo\n") < text.indexOf("\n\nthree\n"));
+  assert.ok(text.indexOf("|11:00]]**: one") < text.indexOf("|11:00]]**: two"));
+  assert.ok(text.indexOf("|11:00]]**: two") < text.indexOf("|11:00]]**: three"));
 });
 
 test("level-six custom sections use bold project labels without breaking Markdown headings", async (t) => {

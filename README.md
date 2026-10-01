@@ -89,7 +89,7 @@ More work on the same project.
 **[[<single-entry-id>|23:13]]**: One entry stays compact.
 ```
 
-A project with one entry puts the timestamp inline at the start of its summary. When a second entry arrives, both timestamps move to separate lines. Summary wording is preserved, including any edits you made.
+Each entry keeps its timestamp inline at the start of its summary, even when a project has multiple entries. Summary wording is preserved, including any edits you made.
 
 Obsidian displays each link as just the timestamp; clicking it opens that entry's detailed summary. The detailed note has two compact frontmatter properties when available: `sessionUsage` for recorded Pi usage within that work block and `logUsage` for LogDig's summary-generation requests, including intermediate chunks. Each shows cost, cached input, uncached input, output, and elapsed time, for example `"$3.73 ⚡12.2M ↑747k ↓62k · 1h 55m"`. Work-block duration is wall-clock time, including idle periods within the block; LogDig duration is the time spent generating that summary. The original session and LogDig calls are counted separately. Historical summaries made before usage tracking have no `logUsage`; their cost cannot be recovered without making new requests. Unknown cost or token counts are omitted, not shown as zero. Keep the summary cache inside your vault so Obsidian can resolve these links. Daily summaries do not create headings or code fences; structured detail stays in the linked note. Custom section headings are supported, with project subheadings one level deeper (or bold project labels beneath a level-six heading).
 
@@ -112,7 +112,7 @@ The identifier in each timestamp link prevents duplicate entries, without HTML c
 
 **Upgrading from whole-session journaling:** old summaries use an incompatible cache key and need one regeneration per selected work block. A real save assigns legacy entries to their work blocks using their recorded journal timestamp, updates or relocates their rows as needed, and keeps the original linked snapshots. Run `backfill N --dry-run` first to see the scope and model work. Status and preview never migrate files.
 
-Saved heading preferences are not overridden by new defaults; rerun setup to change them. An inline timestamp can be expanded when its project gains another entry. Headings inside frontmatter or fenced code are not insertion targets.
+Saved heading preferences are not overridden by new defaults; rerun setup to change them. New entries keep their timestamps inline even when their project already has entries. Headings inside frontmatter or fenced code are not insertion targets.
 
 Missing daily-note and cache folders are created only by a real save. Raw Pi history stays in Pi's storage.
 
