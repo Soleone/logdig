@@ -212,6 +212,7 @@ export async function listJournaledSessions(cacheDirectory) {
       time: metadata.time,
       sourceFingerprint: metadata.sourceFingerprint,
       cacheFingerprint: metadata.cacheFingerprint,
+      project: metadata.project,
       blockId: metadata.blockId,
       blockStart: metadata.blockStart,
       continuationOf: metadata.continuationOf,
@@ -336,6 +337,18 @@ function updateContinuationReference(markdown, continuationOf) {
   return header + (continuationOf ? `\nContinues [[${continuationOf}|previous entry]].\n` : "") + body;
 }
 
+function sourceFingerprintForProject(session, project) {
+  const events = [...(session.context || []), ...(session.events || [])];
+  if (events.some((event) => event.project !== session.project)) return undefined;
+  const relabel = (items) => items.map((event) => ({ ...event, project }));
+  return hashValue([
+    project,
+    session.timezone,
+    relabel(session.context || []),
+    relabel(session.events || []),
+  ]);
+}
+
 export async function inspectSessionSummary(modelClient, cacheDirectory, session) {
   const sourceFingerprint = hashValue([session.project, session.timezone, session.context || [], session.events]);
   // Keep generation policy separate from evidence so model and thinking changes can
@@ -348,7 +361,20 @@ export async function inspectSessionSummary(modelClient, cacheDirectory, session
   const existing = cached && parseSessionNote(cached);
 
   const reused = existing?.cacheFingerprint === cacheFingerprint;
-  return { sessionPath, sourceFingerprint, cacheFingerprint, reused, continuationOf: existing?.continuationOf, summary: reused ? existing.summary : undefined };
+  const previousSourceFingerprint = existing?.project && existing.project !== session.project
+    ? sourceFingerprintForProject(session, existing.project)
+    : undefined;
+  const relabeledReuse = !reused && previousSourceFingerprint === existing?.sourceFingerprint &&
+    existing?.cacheFingerprint === hashValue([SUMMARY_VERSION, JOURNAL_SYSTEM_PROMPT, CHUNK_LIMIT, previousSourceFingerprint, policy]);
+  const reusable = reused || relabeledReuse;
+  return {
+    sessionPath,
+    sourceFingerprint: reusable ? existing.sourceFingerprint : sourceFingerprint,
+    cacheFingerprint: reusable ? existing.cacheFingerprint : cacheFingerprint,
+    reused: reusable,
+    continuationOf: existing?.continuationOf,
+    summary: reusable ? existing.summary : undefined,
+  };
 }
 
 export async function saveSessionSummary(modelClient, cacheDirectory, session, { onGenerate } = {}) {
@@ -661,7 +687,10 @@ export async function inspectDailyEntry(dailyDirectory, heading, entry, journale
   const oldBlocks = locations.blocks.filter((block) => block.id !== id);
   const sameIdBlocks = locations.blocks.filter((block) => block.id === id);
   const missingSnapshot = entry.blockId && present && !snapshots.get(entry.sessionId)?.some((version) => version.id === id);
-  const updated = Boolean(missingSnapshot) || oldBlocks.length > 0 || sameIdBlocks.length > 1 || (!present && sameIdBlocks.length > 0);
+  const projectChanged = locations.blocks.some((block) =>
+    block.snapshot?.project && entry.project && block.snapshot.project !== entry.project,
+  );
+  const updated = Boolean(missingSnapshot) || oldBlocks.length > 0 || sameIdBlocks.length > 1 || (!present && sameIdBlocks.length > 0) || projectChanged;
   return {
     dailyPath,
     existing,
@@ -673,14 +702,19 @@ export async function inspectDailyEntry(dailyDirectory, heading, entry, journale
   };
 }
 
+function updateSnapshotProject(markdown, project) {
+  if (!project || frontmatter(markdown).project === project) return markdown;
+  return markdown.replace(/^project: .*$/m, `project: ${frontmatterValue(project)}`);
+}
+
 async function updateEntrySnapshot(entryPath, entry, createIfMissing) {
   const snapshot = await readMarkdownIfPresent(entryPath);
   if (!snapshot) {
     if (createIfMissing) await writeAtomically(entryPath, await readFile(entry.sessionPath, "utf8"));
     return;
   }
-  if (!entry.metrics) return;
-  const enriched = enrichSessionNote(snapshot, entry.sourceFingerprint, entry.metrics);
+  const withProject = updateSnapshotProject(snapshot, entry.project);
+  const enriched = entry.metrics ? enrichSessionNote(withProject, entry.sourceFingerprint, entry.metrics) : withProject;
   if (enriched !== snapshot) await writeAtomically(entryPath, enriched);
 }
 

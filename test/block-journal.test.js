@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { appendDailyEntry, inspectSessionSummary, parseSessionNote, renderSessionNote, summaryCachePolicy } from "../src/journal.js";
+import { appendDailyEntry, dailyEntryId, inspectSessionSummary, parseSessionNote, renderSessionNote, saveSessionSummary, summaryCachePolicy } from "../src/journal.js";
 import { writeSessions } from "../src/session-runner.js";
 import { workBlocksForSession } from "../src/work-blocks.js";
 
@@ -27,6 +27,60 @@ async function fixture(t) {
 function entryId(markdown) {
   return markdown.match(/\*\*\[\[([a-f0-9]{64})\|\d{2}:\d{2}\]\]\*\*/)[1];
 }
+
+test("project-only relabeling reuses summaries, preserves link IDs, and moves daily entries", async (t) => {
+  const f = await fixture(t);
+  f.session.header.cwd = path.join(f.root, ".herdr", "worktrees", "tasks", "two");
+  const [currentBlock] = workBlocksForSession(f.session, f.settings.timeZone);
+  assert.equal(currentBlock.project, "tasks");
+  const legacyBlock = {
+    ...currentBlock,
+    project: "two",
+    events: currentBlock.events.map((event) => ({ ...event, project: "two" })),
+    context: currentBlock.context.map((event) => ({ ...event, project: "two" })),
+  };
+  const cached = await saveSessionSummary(f.model, f.settings.cacheDirectory, legacyBlock);
+  assert.equal(cached.reused, false);
+  const oldEntry = {
+    date: legacyBlock.date,
+    time: legacyBlock.time,
+    project: "two",
+    sessionId: legacyBlock.header.id,
+    blockId: legacyBlock.blockId,
+    blockStart: legacyBlock.blockStart,
+    cacheFingerprint: cached.cacheFingerprint,
+    sessionPath: cached.sessionPath,
+    sourceFingerprint: cached.sourceFingerprint,
+    metrics: {},
+    summaryLevel: f.settings.dailySummary,
+    summary: cached.summary.small,
+  };
+  const first = await appendDailyEntry(f.settings.dailyDirectory, f.settings.dailyHeader, oldEntry);
+  const originalId = dailyEntryId(oldEntry, f.settings.dailyHeader);
+  assert.match(await readFile(first.dailyPath, "utf8"), /^## two$/m);
+
+  const migrated = await writeSessions(f.model, [f.session], f.settings);
+  assert.deepEqual(migrated.errors, []);
+  assert.equal(migrated.summariesCreated, 0);
+  assert.equal(migrated.summariesReused, 1);
+  assert.equal(migrated.entriesUpdated, 1);
+  assert.equal(f.prompts.length, 1);
+
+  const daily = await readFile(first.dailyPath, "utf8");
+  assert.match(daily, /^## tasks$/m);
+  assert.doesNotMatch(daily, /^## two$/m);
+  assert.equal(entryId(daily), originalId);
+  assert.match(daily, /Summary 1\./);
+  const snapshot = parseSessionNote(await readFile(path.join(f.settings.cacheDirectory, "Entries", `${originalId}.md`), "utf8"));
+  assert.equal(snapshot.project, "tasks");
+
+  const repeated = await writeSessions(f.model, [f.session], f.settings);
+  assert.deepEqual(repeated.errors, []);
+  assert.equal(repeated.entriesSkipped, 1);
+  assert.equal(repeated.summariesReused, 1);
+  assert.equal(f.prompts.length, 1);
+  assert.equal(await readFile(first.dailyPath, "utf8"), daily);
+});
 
 test("continuation creates a separate daily entry, preserves earlier notes, and links the original snapshot", async (t) => {
   const f = await fixture(t);

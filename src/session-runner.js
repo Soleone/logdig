@@ -243,8 +243,11 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
           dailyPath: dailyEntry.dailyPath,
         });
         // Dry-run predictions stay in plannedSnapshots, never in the real index.
-        if (!range.dryRun && !versions.some((version) => version.id === entryId)) {
-          versions.push({ ...entry, id: entryId, summary: cached.summary });
+        if (!range.dryRun) {
+          const versionIndex = versions.findIndex((version) => version.id === entryId);
+          const updatedVersion = { ...entry, id: entryId, summary: cached.summary };
+          if (versionIndex === -1) versions.push(updatedVersion);
+          else versions[versionIndex] = updatedVersion;
         }
         dates.add(block.date);
         dailyPaths.add(dailyEntry.dailyPath);
