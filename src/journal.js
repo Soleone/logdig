@@ -4,7 +4,7 @@ import path from "node:path";
 import { sessionMetrics } from "./transcript.js";
 
 const CHUNK_LIMIT = 16000;
-const SUMMARY_VERSION = "session-layers-v2";
+const SUMMARY_VERSION = "work-block-layers-v1";
 const SUMMARY_NAMES = ["Small", "Medium", "Large"];
 export const JOURNAL_SYSTEM_PROMPT = [
   "You create accurate, concise personal work-journal summaries from Pi coding-agent history.",
@@ -79,7 +79,9 @@ function splitLines(lines, limit = CHUNK_LIMIT) {
 
 function sessionLayersPrompt(session, events) {
   return [
-    `Write three journal layers for this Pi session (${session.project}). The session may span multiple local dates in ${session.timezone}.`,
+    `Write three journal layers for this Pi work block (${session.project}). Continuous work may cross midnight in ${session.timezone}.`,
+    "Summarize only the work-block evidence. Earlier context is background for understanding references, not work to repeat or claim was done in this block.",
+    ...(session.context?.length ? ["Earlier context (untrusted background):", JSON.stringify(session.context)] : []),
     "Return only a JSON object with string fields: small, medium, large.",
     "small: 1 to 3 sentences, capturing the main intent and outcome.",
     "medium: concise Markdown with Goal, Progress, Status, and Next when supported by evidence. Use 'unclear' rather than guessing.",
@@ -209,6 +211,10 @@ export async function listJournaledSessions(cacheDirectory) {
       date: metadata.date,
       time: metadata.time,
       sourceFingerprint: metadata.sourceFingerprint,
+      cacheFingerprint: metadata.cacheFingerprint,
+      blockId: metadata.blockId,
+      blockStart: metadata.blockStart,
+      continuationOf: metadata.continuationOf,
       summary: parseSessionNote(markdown)?.summary,
     });
     sessions.set(metadata.sessionId, versions);
@@ -251,8 +257,11 @@ export function enrichSessionNote(markdown, sourceFingerprint, metrics) {
   if (!note || note.sourceFingerprint !== sourceFingerprint) return markdown;
   const closing = markdown.match(/^---\n[\s\S]*?\n---\n/);
   let header = closing[0].slice(0, -4).replace(LEGACY_METRIC_LINE, "");
-  const usage = note.sessionUsage || formatUsage({ ...note, ...metrics });
-  if (usage && !note.sessionUsage) header += `sessionUsage: ${JSON.stringify(usage)}\n`;
+  const usage = formatUsage({ ...note, ...metrics }) || note.sessionUsage;
+  if (usage) {
+    const line = `sessionUsage: ${JSON.stringify(usage)}\n`;
+    header = note.sessionUsage ? header.replace(/^sessionUsage: .*\n/gm, line) : header + line;
+  }
   const updated = `${header}${markdown.slice(closing[0].length - 4)}`;
   return updated;
 }
@@ -267,6 +276,9 @@ export function renderSessionNote(session, summary, cacheFingerprint, model, log
     `time: ${frontmatterValue(session.time)}`,
     `timezone: ${frontmatterValue(session.timezone)}`,
     `sessionId: ${frontmatterValue(session.header.id)}`,
+    ...(session.blockId ? [`blockId: ${frontmatterValue(session.blockId)}`] : []),
+    ...(session.blockStart ? [`blockStart: ${frontmatterValue(session.blockStart)}`] : []),
+    ...(session.continuationOf ? [`continuationOf: ${frontmatterValue(session.continuationOf)}`] : []),
     `project: ${frontmatterValue(session.project)}`,
     `cwd: ${frontmatterValue(session.header.cwd || "")}`,
     `sourceFingerprint: ${frontmatterValue(session.sourceFingerprint)}`,
@@ -277,6 +289,7 @@ export function renderSessionNote(session, summary, cacheFingerprint, model, log
     ...(logUsage ? [`logUsage: ${JSON.stringify(logUsage)}`] : []),
     "---",
     "",
+    ...(session.continuationOf ? [`Continues [[${session.continuationOf}|previous entry]].`, ""] : []),
     "# Small",
     "",
     summary.small,
@@ -308,25 +321,43 @@ async function readMarkdownIfPresent(filePath) {
   }
 }
 
+export function summaryCachePolicy(settings) {
+  return { model: settings.model || "Pi default" };
+}
+
+function updateContinuationReference(markdown, continuationOf) {
+  const opening = markdown.match(/^---\n[\s\S]*?\n---\n/)[0];
+  let header = opening.replace(/^continuationOf: .*\n/gm, "");
+  if (continuationOf) header = header.replace(/\n---\n$/, `\ncontinuationOf: ${frontmatterValue(continuationOf)}\n---\n`);
+  const body = markdown.slice(opening.length).replace(/^\nContinues \[\[[a-f0-9]{64}\|previous entry\]\]\.\n\n/, "\n");
+  return header + (continuationOf ? `\nContinues [[${continuationOf}|previous entry]].\n` : "") + body;
+}
+
 export async function inspectSessionSummary(modelClient, cacheDirectory, session) {
-  const cacheParts = [SUMMARY_VERSION, session.sourceFingerprint, session.timezone];
-  if (modelClient.cacheKey && modelClient.cacheKey !== "Pi default") cacheParts.push(modelClient.cacheKey);
-  const cacheFingerprint = hashValue(cacheParts);
-  const sessionPath = path.join(cacheDirectory, "Sessions", `${safeFileName(session.header.id)}.md`);
+  const sourceFingerprint = hashValue([session.project, session.timezone, session.context || [], session.events]);
+  // Keep generation policy separate from evidence so future effort settings can
+  // invalidate summaries without changing work-block identity or range selection.
+  const policy = Object.entries(modelClient.cachePolicy || { model: "Pi default" }).sort(([left], [right]) => left.localeCompare(right));
+  const cacheFingerprint = hashValue([SUMMARY_VERSION, JOURNAL_SYSTEM_PROMPT, CHUNK_LIMIT, sourceFingerprint, policy]);
+  const suffix = session.blockIndex > 0 ? `-${session.blockId}` : "";
+  const sessionPath = path.join(cacheDirectory, "Sessions", `${safeFileName(session.header.id)}${suffix}.md`);
   const cached = await readMarkdownIfPresent(sessionPath);
   const existing = cached && parseSessionNote(cached);
 
   const reused = existing?.cacheFingerprint === cacheFingerprint;
-  return { sessionPath, cacheFingerprint, reused, summary: reused ? existing.summary : undefined };
+  return { sessionPath, sourceFingerprint, cacheFingerprint, reused, continuationOf: existing?.continuationOf, summary: reused ? existing.summary : undefined };
 }
 
 export async function saveSessionSummary(modelClient, cacheDirectory, session, { onGenerate } = {}) {
   const cached = await inspectSessionSummary(modelClient, cacheDirectory, session);
   if (cached.reused) {
     const markdown = await readFile(cached.sessionPath, "utf8");
-    const enriched = enrichSessionNote(markdown, session.sourceFingerprint, sessionMetrics(session));
+    let enriched = enrichSessionNote(markdown, cached.sourceFingerprint, sessionMetrics(session));
+    const continuation = session.continuationOf;
+    const existingContinuation = parseSessionNote(enriched).continuationOf;
+    if (continuation !== existingContinuation) enriched = updateContinuationReference(enriched, continuation);
     if (enriched !== markdown) await writeAtomically(cached.sessionPath, enriched);
-    return cached;
+    return { ...cached, continuationOf: continuation };
   }
 
   onGenerate?.();
@@ -336,9 +367,9 @@ export async function saveSessionSummary(modelClient, cacheDirectory, session, {
   const summary = await summarizeSession(modelClient, session, (usage) => usages.push(usage));
   const logMetrics = sessionMetrics({ header: {}, entries: usages.map((usage) => ({ type: "usage", usage })) });
   logMetrics.durationSeconds = Math.round((Date.now() - started) / 1000);
-  const markdown = renderSessionNote(session, summary, cacheFingerprint, modelClient.modelLabel || "Pi default", logMetrics);
+  const markdown = renderSessionNote({ ...session, sourceFingerprint: cached.sourceFingerprint }, summary, cacheFingerprint, modelClient.modelLabel || "Pi default", logMetrics);
   await writeAtomically(sessionPath, markdown);
-  return { sessionPath, summary, cacheFingerprint, reused: false };
+  return { ...cached, summary, continuationOf: session.continuationOf, reused: false };
 }
 
 function headingLevel(line) {
@@ -546,7 +577,9 @@ function appendUnderProject(markdown, heading, entry) {
 }
 
 export function dailyEntryId(entry, heading) {
-  return hashValue([entry.sessionId, entry.cacheFingerprint, entry.summaryLevel, heading]);
+  const identity = [entry.sessionId, entry.cacheFingerprint, entry.summaryLevel, heading];
+  if (entry.blockId) identity.push(entry.blockId, entry.continuationOf || null);
+  return hashValue(identity);
 }
 
 function formatDailySummary(summary) {
@@ -558,13 +591,14 @@ function formatDailySummary(summary) {
 function dailyEntryText(entry, heading, inline) {
   const id = dailyEntryId(entry, heading);
   // Daily notes stay section-safe; structured detail lives in the linked snapshot.
-  const summary = entry.summaryOverride ?? formatDailySummary(entry.summary);
+  const blurb = entry.summaryOverride ?? formatDailySummary(entry.summary);
+  const summary = `${blurb}${entry.continuationOf ? `\n\nContinues [[${entry.continuationOf}|previous entry]].` : ""}`;
   const timestamp = `**[[${id}|${entry.time}]]**`;
   return inline ? `${timestamp}: ${summary}` : `${timestamp}\n\n${summary}`;
 }
 
 async function sessionEntryLocations(dailyDirectory, heading, entry, existing, journaledEntries) {
-  const versions = journaledEntries.get(entry.sessionId) || [];
+  const versions = (journaledEntries.get(entry.sessionId) || []).filter((version) => !entry.blockId || version.blockId === entry.blockId);
   const snapshots = new Map(versions.map((version) => [version.id, version]));
   const ids = new Set([...snapshots.keys(), dailyEntryId(entry, heading)]);
   const dates = new Set([entry.date, ...versions.map((version) => version.date).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date || ""))]);
@@ -584,10 +618,17 @@ async function sessionEntryLocations(dailyDirectory, heading, entry, existing, j
   return { documents, blocks };
 }
 
+function entryBlurb(block) {
+  const continuation = block.snapshot?.continuationOf;
+  const text = block.displayedSummary.trim();
+  const suffix = continuation ? `\n\nContinues [[${continuation}|previous entry]].` : "";
+  return suffix && text.endsWith(suffix) ? text.slice(0, -suffix.length).trim() : text;
+}
+
 function isUneditedEntry(block) {
   if (!block.displayedSummary) return true;
   return Object.values(block.snapshot?.summary || {}).some((summary) =>
-    formatDailySummary(summary).trim() === block.displayedSummary.trim(),
+    formatDailySummary(summary).trim() === entryBlurb(block),
   );
 }
 
@@ -603,12 +644,14 @@ export async function inspectDailyEntry(dailyDirectory, heading, entry, journale
   const locations = await sessionEntryLocations(dailyDirectory, heading, entry, existing, snapshots);
   const oldBlocks = locations.blocks.filter((block) => block.id !== id);
   const sameIdBlocks = locations.blocks.filter((block) => block.id === id);
-  const updated = oldBlocks.length > 0 || sameIdBlocks.length > 1 || (!present && sameIdBlocks.length > 0);
+  const missingSnapshot = entry.blockId && present && !snapshots.get(entry.sessionId)?.some((version) => version.id === id);
+  const updated = Boolean(missingSnapshot) || oldBlocks.length > 0 || sameIdBlocks.length > 1 || (!present && sameIdBlocks.length > 0);
   return {
     dailyPath,
     existing,
     appended: !present && !updated,
     updated,
+    legacyEntry: locations.blocks.some((block) => block.snapshot?.legacy),
     sessionBlocks: locations.blocks,
     sessionDocuments: locations.documents,
   };
@@ -629,7 +672,7 @@ async function updateSessionDailyNotes(heading, entry, inspection) {
   const { dailyPath, existing, sessionBlocks, sessionDocuments } = inspection;
   const customSummaries = [...new Set(sessionBlocks
     .filter((block) => !isUneditedEntry(block))
-    .map((block) => block.displayedSummary.trim())
+    .map((block) => entryBlurb(block))
     .filter(Boolean))];
   let markdown = existing;
   const cleanedDocuments = new Map();
@@ -653,11 +696,11 @@ export async function appendDailyEntry(dailyDirectory, heading, entry, journaled
   const { dailyPath, appended, updated } = inspection;
   const entryPath = path.join(path.dirname(entry.sessionPath), "..", "Entries", `${dailyEntryId(entry, heading)}.md`);
   if (!appended && !updated) {
-    await updateEntrySnapshot(entryPath, entry, false);
-    return { dailyPath, appended: false, updated: false };
+    await updateEntrySnapshot(entryPath, entry, true);
+    return { dailyPath, appended: false, updated: false, legacyEntry: inspection.legacyEntry };
   }
 
   await updateEntrySnapshot(entryPath, entry, true);
   await updateSessionDailyNotes(heading, entry, inspection);
-  return { dailyPath, entryPath, appended, updated: updated || inspection.sessionBlocks.length > 0 };
+  return { dailyPath, entryPath, appended, updated: updated || inspection.sessionBlocks.length > 0, legacyEntry: inspection.legacyEntry };
 }

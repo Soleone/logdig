@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import path from "node:path";
 
 const READ_TOOLS = new Set([
@@ -45,12 +44,6 @@ export function sessionFromJsonl(text, sourcePath = "<session>") {
   return parseSessionJsonl(text, sourcePath);
 }
 
-export function fingerprintSession(session) {
-  return createHash("sha256")
-    .update(JSON.stringify([session.header, session.entries]))
-    .digest("hex");
-}
-
 export function textContent(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -69,7 +62,7 @@ export function redactAndClip(value, maxLength = 1800) {
   return `${text.slice(0, maxLength)}\n[truncated]`;
 }
 
-function timestampOf(entry) {
+export function timestampOf(entry) {
   const value = entry.timestamp ?? entry.message?.timestamp;
   if (typeof value === "number") return value;
   if (typeof value === "string") {
@@ -121,8 +114,8 @@ export function sessionMetrics(session) {
   return metrics;
 }
 
-function localParts(timestamp, timeZone) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
+export function localTimeFormatter(timeZone) {
+  return new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
     month: "2-digit",
@@ -130,7 +123,11 @@ function localParts(timestamp, timeZone) {
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
-  }).formatToParts(new Date(timestamp));
+  });
+}
+
+export function localParts(timestamp, formatter) {
+  const parts = formatter.formatToParts(new Date(timestamp));
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return {
     date: `${values.year}-${values.month}-${values.day}`,
@@ -172,10 +169,10 @@ function outputExcerpt(content, limit = 420) {
   return `${text.slice(0, half)}\n[…output clipped…]\n${text.slice(-half)}`;
 }
 
-function eventFor(entry, timeZone, toolCalls) {
+function eventFor(entry, formatter, toolCalls) {
   const timestamp = timestampOf(entry);
   if (timestamp === undefined) return undefined;
-  const { date, time } = localParts(timestamp, timeZone);
+  const { date, time } = localParts(timestamp, formatter);
   const message = entry.message;
 
   if (entry.type === "compaction" || entry.type === "branch_summary") {
@@ -251,14 +248,14 @@ function eventFor(entry, timeZone, toolCalls) {
   return undefined;
 }
 
-export function eventsForSession(session, timeZone) {
+export function eventsForSession(session, timeZone, extraction = { formatter: localTimeFormatter(timeZone), toolCalls: new Map() }) {
   const events = [];
-  const toolCalls = new Map();
+  const { formatter, toolCalls } = extraction;
   const cwd = session.header.cwd || "";
   const project = (cwd ? path.basename(cwd) : "").replace(/^\d{4}-\d{2}-\d{2}-(?=.)/, "") || "unknown project";
 
   for (const entry of session.entries) {
-    const generated = eventFor(entry, timeZone, toolCalls);
+    const generated = eventFor(entry, formatter, toolCalls);
     if (!generated) continue;
     for (const event of Array.isArray(generated) ? generated : [generated]) {
       events.push({

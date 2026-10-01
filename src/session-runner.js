@@ -1,7 +1,8 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { appendDailyEntry, inspectDailyEntry, inspectSessionSummary, listJournaledSessions, saveSessionSummary } from "./journal.js";
-import { eventsForSession, fingerprintSession, sessionFromJsonl, sessionMetrics } from "./transcript.js";
+import { appendDailyEntry, dailyEntryId, inspectDailyEntry, inspectSessionSummary, listJournaledSessions, saveSessionSummary } from "./journal.js";
+import { sessionFromJsonl, sessionMetrics } from "./transcript.js";
+import { assignLegacyBlocks, blockInRange, workBlocksForSession } from "./work-blocks.js";
 
 function localDate(timestamp, timeZone) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -83,7 +84,6 @@ export async function collectSessions({ sessionDirectory, timeZone, days, curren
       if (modifiedAfter && fileStat.mtimeMs < modifiedAfter) continue;
       const session = sessionFromJsonl(await readFile(file, "utf8"), file);
       if (session.header.id === currentId || seen.has(session.header.id)) continue;
-      session.fingerprint = fingerprintSession(session);
       seen.add(session.header.id);
       sessions.push(session);
     } catch (error) {
@@ -94,6 +94,31 @@ export async function collectSessions({ sessionDirectory, timeZone, days, curren
   if (currentSession && !seen.has(currentSession.header.id)) sessions.push(currentSession);
   sessions.sort((left, right) => sessionEndTime(left) - sessionEndTime(right) || left.header.id.localeCompare(right.header.id));
   return { sessions, warnings, firstDate, lastDate: today };
+}
+
+function selectedBlockIndexes(blocks, versions, range) {
+  const selected = new Set(blocks.flatMap((block, index) => blockInRange(block, range) ? [index] : []));
+  // A continuation must link to a real snapshot, not a predicted filename.
+  for (let index = blocks.length - 1; index > 0; index--) {
+    if (selected.has(index) && !versions.some((version) => version.blockId === blocks[index - 1].blockId && version.summary)) {
+      selected.add(index - 1);
+    }
+  }
+  return selected;
+}
+
+async function precedingSnapshot(modelClient, previous, versions, settings) {
+  const snapshots = versions.filter((version) => version.blockId === previous.blockId && version.summary);
+  if (!snapshots.length) throw new Error("preceding work block has no saved snapshot; fix its error and retry");
+  const cached = await inspectSessionSummary(modelClient, settings.cacheDirectory, previous);
+  const expectedId = dailyEntryId({
+    sessionId: previous.header.id,
+    blockId: previous.blockId,
+    cacheFingerprint: cached.cacheFingerprint,
+    continuationOf: cached.continuationOf,
+    summaryLevel: settings.dailySummary,
+  }, settings.dailyHeader);
+  return (snapshots.find((snapshot) => snapshot.id === expectedId) || snapshots[0]).id;
 }
 
 export async function writeSessions(modelClient, sessions, settings, range = {}) {
@@ -111,82 +136,109 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
 
   for (const [index, session] of sessions.entries()) {
     const progress = { index: index + 1, total: sessions.length, sessionId: session.header.id };
+    let blocks;
     try {
-      const events = eventsForSession(session, settings.timeZone);
-      const lastUserEvent = events.findLast((event) => event.kind === "user intent");
-      const closingEvent = lastUserEvent || events.at(-1);
-      if (!closingEvent || (range.firstDate && (closingEvent.date < range.firstDate || closingEvent.date > range.lastDate))) {
-        sessionsSkipped++;
-        const reason = closingEvent ? "outside date range" : "no journalable events";
-        sessionResults.push({ sessionId: session.header.id, status: "skipped", reason });
-        range.onProgress?.({ ...progress, phase: "skipped", status: reason });
-        continue;
-      }
-
-      const journalSession = {
-        ...session,
-        date: closingEvent.date,
-        time: closingEvent.time,
-        timezone: settings.timeZone,
-        project: events[0].project || "unknown project",
-        events,
-        sourceFingerprint: session.fingerprint || fingerprintSession(session),
-      };
-      Object.assign(progress, { project: journalSession.project, date: journalSession.date, time: journalSession.time });
-      range.onProgress?.({ ...progress, phase: "checking", status: "checking saved summary" });
-      const cached = range.dryRun
-        ? await inspectSessionSummary(modelClient, settings.cacheDirectory, journalSession)
-        : await saveSessionSummary(modelClient, settings.cacheDirectory, journalSession, {
-          onGenerate: () => range.onProgress?.({ ...progress, phase: "summarizing", status: "summarizing with Pi; large sessions may take a few minutes" }),
-        });
-      if (cached.reused) summariesReused++;
-      else summariesCreated++;
-
-      const entry = {
-        date: journalSession.date,
-        time: journalSession.time,
-        project: journalSession.project,
-        sessionId: journalSession.header.id,
-        cacheFingerprint: cached.cacheFingerprint,
-        sessionPath: cached.sessionPath,
-        sourceFingerprint: journalSession.sourceFingerprint,
-        metrics: sessionMetrics(journalSession),
-        summaryLevel: settings.dailySummary,
-        summary: cached.summary?.[settings.dailySummary],
-      };
-      const dailyEntry = range.dryRun
-        ? await inspectDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry, journaledEntries)
-        : await appendDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry, journaledEntries);
-      if (dailyEntry.updated) entriesUpdated++;
-      else if (dailyEntry.appended) entriesAppended++;
-      else entriesSkipped++;
-      sessionResults.push({
-        sessionId: journalSession.header.id,
-        project: journalSession.project,
-        date: journalSession.date,
-        time: journalSession.time,
-        entryPresent: !dailyEntry.appended && !dailyEntry.updated,
-        entryUpdated: Boolean(dailyEntry.updated),
-        summaryReused: cached.reused,
-        sourceFingerprint: journalSession.sourceFingerprint,
-        sessionPath: cached.sessionPath,
-        dailyPath: dailyEntry.dailyPath,
-      });
-      dates.add(journalSession.date);
-      dailyPaths.add(dailyEntry.dailyPath);
-      range.onProgress?.({
-        ...progress,
-        phase: "complete",
-        sessionPath: cached.sessionPath,
-        dailyPath: dailyEntry.dailyPath,
-        status: range.dryRun
-          ? `${cached.reused ? "would reuse summary" : "would summarize with Pi"}, ${dailyEntry.updated ? "would update entry" : dailyEntry.appended ? "would append entry" : "entry already present"}`
-          : `${cached.reused ? "summary reused" : "summary created"}, ${dailyEntry.updated ? "entry updated" : dailyEntry.appended ? "entry appended" : "entry already present"}`,
-      });
+      blocks = workBlocksForSession(session, settings.timeZone);
     } catch (error) {
       errors.push(`${session.header.id}: ${error.message}`);
       sessionResults.push({ sessionId: session.header.id, status: "error", error: error.message });
       range.onProgress?.({ ...progress, phase: "error", error: error.message });
+      continue;
+    }
+    const versions = journaledEntries.get(session.header.id) || [];
+    journaledEntries.set(session.header.id, versions);
+    assignLegacyBlocks(versions, blocks);
+    const selected = selectedBlockIndexes(blocks, versions, range);
+    if (!selected.size) {
+      sessionsSkipped++;
+      const reason = blocks.length ? "outside date range" : "no journalable events";
+      sessionResults.push({ sessionId: session.header.id, status: "skipped", reason });
+      range.onProgress?.({ ...progress, phase: "skipped", status: reason });
+      continue;
+    }
+
+    const plannedSnapshots = new Map();
+    for (const [blockIndex, block] of blocks.entries()) {
+      if (!selected.has(blockIndex)) continue;
+      const blockProgress = { ...progress, blockId: block.blockId, project: block.project, date: block.date, time: block.time };
+      try {
+        const previous = blocks[blockIndex - 1];
+        const continuationOf = previous
+          ? plannedSnapshots.get(previous.blockId) || await precedingSnapshot(modelClient, previous, versions, settings)
+          : undefined;
+        const journalBlock = { ...block, continuationOf };
+        const prerequisite = !blockInRange(block, range);
+        range.onProgress?.({ ...blockProgress, phase: "checking", status: "checking saved summary" });
+        const cached = range.dryRun
+          ? await inspectSessionSummary(modelClient, settings.cacheDirectory, journalBlock)
+          : await saveSessionSummary(modelClient, settings.cacheDirectory, journalBlock, {
+            onGenerate: () => range.onProgress?.({ ...blockProgress, phase: "summarizing", status: "summarizing with Pi; large sessions may take a few minutes" }),
+          });
+        if (cached.reused) summariesReused++;
+        else summariesCreated++;
+
+        const entry = {
+          date: block.date,
+          time: block.time,
+          project: block.project,
+          sessionId: session.header.id,
+          blockId: block.blockId,
+          blockStart: block.blockStart,
+          continuationOf,
+          cacheFingerprint: cached.cacheFingerprint,
+          sessionPath: cached.sessionPath,
+          sourceFingerprint: cached.sourceFingerprint,
+          metrics: sessionMetrics(block),
+          summaryLevel: settings.dailySummary,
+          summary: cached.summary?.[settings.dailySummary],
+        };
+        const dailyEntry = range.dryRun
+          ? await inspectDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry, journaledEntries)
+          : await appendDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry, journaledEntries);
+        if (dailyEntry.updated) entriesUpdated++;
+        else if (dailyEntry.appended) entriesAppended++;
+        else entriesSkipped++;
+        const entryId = dailyEntryId(entry, settings.dailyHeader);
+        plannedSnapshots.set(block.blockId, entryId);
+        sessionResults.push({
+          sessionId: session.header.id,
+          blockId: block.blockId,
+          project: block.project,
+          date: block.date,
+          time: block.time,
+          activityDates: block.activityDates,
+          prerequisite,
+          continuationOf,
+          entryPresent: !dailyEntry.appended && !dailyEntry.updated,
+          entryUpdated: Boolean(dailyEntry.updated),
+          legacyEntry: dailyEntry.legacyEntry,
+          summaryReused: cached.reused,
+          sourceFingerprint: cached.sourceFingerprint,
+          cacheFingerprint: cached.cacheFingerprint,
+          sessionPath: cached.sessionPath,
+          dailyPath: dailyEntry.dailyPath,
+        });
+        // Dry-run predictions stay in plannedSnapshots, never in the real index.
+        if (!range.dryRun && !versions.some((version) => version.id === entryId)) {
+          versions.push({ ...entry, id: entryId, summary: cached.summary });
+        }
+        dates.add(block.date);
+        dailyPaths.add(dailyEntry.dailyPath);
+        range.onProgress?.({
+          ...blockProgress,
+          phase: "complete",
+          prerequisite,
+          sessionPath: cached.sessionPath,
+          dailyPath: dailyEntry.dailyPath,
+          status: (range.dryRun
+            ? `${cached.reused ? "would reuse summary" : "would summarize with Pi"}, ${dailyEntry.updated ? "would update entry" : dailyEntry.appended ? "would append entry" : "entry already present"}`
+            : `${cached.reused ? "summary reused" : "summary created"}, ${dailyEntry.updated ? "entry updated" : dailyEntry.appended ? "entry appended" : "entry already present"}`) + (prerequisite ? " (earlier block needed for continuation link)" : ""),
+        });
+      } catch (error) {
+        errors.push(`${session.header.id}: ${block.date} ${block.time}: ${error.message}`);
+        sessionResults.push({ sessionId: session.header.id, blockId: block.blockId, status: "error", error: error.message });
+        range.onProgress?.({ ...blockProgress, phase: "error", error: error.message });
+      }
     }
   }
 

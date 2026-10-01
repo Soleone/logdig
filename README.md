@@ -2,7 +2,7 @@
 
 Remember what you worked on, without writing another status report.
 
-LogDig turns saved [Pi](https://pi.dev) sessions into short entries in your Obsidian daily notes. Your handwritten content stays in place. Each session also gets a cached Markdown note with **Small**, **Medium**, and **Large** summaries, so the details are there when you want them.
+LogDig turns saved [Pi](https://pi.dev) sessions into short entries in your Obsidian daily notes. Your handwritten content stays in place. Each work block also gets a cached Markdown note with **Small**, **Medium**, and **Large** summaries, so the details are there when you want them.
 
 No build step, runtime dependencies, or separate model credentials. Try a safe preview before sending any history to a model.
 
@@ -43,7 +43,7 @@ When the preview looks right:
 logdig backfill 1
 ```
 
-This journals sessions whose last user message was **today in your configured timezone**, not a rolling 24-hour window. If today is quiet, preview seven days instead:
+This journals work blocks with conversation activity **today in your configured timezone**, not a rolling 24-hour window. Overnight work can update yesterday's note without moving it to today. If today is quiet, preview seven days instead:
 
 ```sh
 logdig backfill 7 --dry-run
@@ -61,7 +61,8 @@ My Vault/
 │   └── YYYY-MM-DD.md             your writing, plus project-grouped summaries under # Projects
 └── LogDig/
     ├── Sessions/
-    │   └── <session-id>.md       latest cached summary and provenance
+    │   ├── <session-id>.md       latest summary of the first work block
+│   └── <session-id>-<block-id>.md  latest summary of each continuation
     └── Entries/
         └── <entry-id>.md         snapshot of all three layers for a journal entry
 ```
@@ -90,11 +91,28 @@ More work on the same project.
 
 A project with one entry puts the timestamp inline at the start of its summary. When a second entry arrives, both timestamps move to separate lines. Summary wording is preserved, including any edits you made.
 
-Obsidian displays each link as just the timestamp; clicking it opens that entry's detailed summary. The detailed note has two compact frontmatter properties when available: `sessionUsage` for recorded Pi-session usage and `logUsage` for LogDig's summary-generation requests, including intermediate chunks. Each shows cost, cached input, uncached input, output, and elapsed time, for example `"$3.73 ⚡12.2M ↑747k ↓62k · 1h 55m"`. Session duration is wall-clock time, including idle periods; LogDig duration is the time spent generating that summary. The original session and LogDig calls are counted separately. Historical summaries made before usage tracking have no `logUsage`; their cost cannot be recovered without making new requests. Unknown cost or token counts are omitted, not shown as zero. Keep the summary cache inside your vault so Obsidian can resolve these links. Daily summaries do not create headings or code fences; structured detail stays in the linked note. Custom section headings are supported, with project subheadings one level deeper (or bold project labels beneath a level-six heading).
+Obsidian displays each link as just the timestamp; clicking it opens that entry's detailed summary. The detailed note has two compact frontmatter properties when available: `sessionUsage` for recorded Pi usage within that work block and `logUsage` for LogDig's summary-generation requests, including intermediate chunks. Each shows cost, cached input, uncached input, output, and elapsed time, for example `"$3.73 ⚡12.2M ↑747k ↓62k · 1h 55m"`. Work-block duration is wall-clock time, including idle periods within the block; LogDig duration is the time spent generating that summary. The original session and LogDig calls are counted separately. Historical summaries made before usage tracking have no `logUsage`; their cost cannot be recovered without making new requests. Unknown cost or token counts are omitted, not shown as zero. Keep the summary cache inside your vault so Obsidian can resolve these links. Daily summaries do not create headings or code fences; structured detail stays in the linked note. Custom section headings are supported, with project subheadings one level deeper (or bold project labels beneath a level-six heading).
 
-The **last user message** supplies the date and time, even if the assistant finishes after midnight. Alternate session branches are included as explorations, not assumed to be the final result.
+### Overnight work and continuations
 
-Unchanged sessions reuse their summaries. The identifier in each timestamp link prevents duplicate entries, without HTML comments. Older project-name links and comment-wrapped entries are still recognized. When a session evolves, LogDig replaces its daily-note row with a link to the latest summary instead of adding another row. Previous linked snapshots remain unchanged in `Entries/`, and manually edited daily summaries are preserved. Changing the default does not override existing saved heading preferences; rerun setup to change them. An inline timestamp can be expanded when its project gains another entry. Headings inside frontmatter or fenced code are not insertion targets.
+A saved Pi session can contain several **work blocks**. A new block starts only at a new user message when both conditions hold:
+
+- Its local date is later than the current block's starting date.
+- At least **four hours** have passed since the preceding conversation activity. Assistant messages and tool results count as activity; session names, model switches, labels, usage records, and extension bookkeeping do not.
+
+The block's **starting date and time** supply its journal timestamp. Continuous work from 10pm to 2am stays one entry on the starting day. Returning at 11am after a long break creates a separate entry on the new day, with a **Continues** link to the preceding block's saved snapshot. Repeated saves are checkpoints, not boundaries. Alternate session branches are included as explorations, not assumed to be the final result.
+
+Date ranges select actual conversation activity, not just assigned journal dates. Today's backfill therefore catches assistant completion or continued work after midnight and updates yesterday's entry. If a selected continuation has no preceding snapshot, LogDig includes the missing earlier block(s) as prerequisites. Status and preview explicitly show these additions, including their summary-generation cost implications.
+
+### Summary reuse and existing journals
+
+Summary freshness is based on the selected, redacted evidence and bounded earlier context, plus summary-processing version, timezone, and configured generation policy. Earlier context is drawn from the preceding block's evidence, not its generated summary, and is marked as background rather than work to repeat. Metadata-only changes do not trigger model requests; usage totals can refresh separately. Explicit LogDig model changes invalidate summaries, while changes to Pi's default model do not force regeneration under the default policy.
+
+The identifier in each timestamp link prevents duplicate entries, without HTML comments. Older project-name links and comment-wrapped entries are still recognized. When a block evolves, LogDig replaces only that block's daily-note row with a link to the latest summary. Earlier blocks stay in place. Previous linked summary snapshots remain in `Entries/`, and manually edited daily summaries are preserved; usage metadata may be refreshed without regenerating the prose.
+
+**Upgrading from whole-session journaling:** old summaries use an incompatible cache key and need one regeneration per selected work block. A real save assigns legacy entries to their work blocks using their recorded journal timestamp, updates or relocates their rows as needed, and keeps the original linked snapshots. Run `backfill N --dry-run` first to see the scope and model work. Status and preview never migrate files.
+
+Saved heading preferences are not overridden by new defaults; rerun setup to change them. An inline timestamp can be expanded when its project gains another entry. Headings inside frontmatter or fenced code are not insertion targets.
 
 Missing daily-note and cache folders are created only by a real save. Raw Pi history stays in Pi's storage.
 
@@ -122,9 +140,9 @@ logdig pi-uninstall                 remove it without deleting notes or summarie
 
 `--help` works before setup, including `logdig init --help`, `logdig backfill --help`, and `logdig status --help`.
 
-`status` is a read-only coverage check. It reports current journal entries, sessions that need updating, missing entries, and whether each summary is cached or needs a model request. It uses the last user message date in your configured timezone. It never calls a model or writes files; scan warnings make the command exit nonzero so incomplete coverage is clear.
+`status` is a read-only coverage check. It counts work blocks: **logged** means the expected entry is present, **stale** means a previous snapshot exists but the entry needs updating, and **new** means no previous block snapshot was found. Summaries are reported separately as reusable or needing summarization. These are block counts, not exact request counts. It selects blocks by conversation activity in your configured timezone, including overnight updates and any missing continuation prerequisites. It never calls a model or writes files; scan warnings make the command exit nonzero so incomplete coverage is clear. JSON retains `sessions` as the result array, with one row per work block and both `sessionId` and `blockId`; totals use `logged`, `stale`, `new`, and `needsSummarizing`.
 
-New summaries may incur provider charges. Large sessions are summarized in chunks and may need several model requests each. Backfill shows which project it is working on before the model completes. Failed sessions are reported, other sessions continue, and the command exits nonzero if anything needs attention. Fix the issue and rerun the same command; completed summaries are reused, even if a previous attempt failed to write a daily note.
+New summaries may incur provider charges. Large work blocks are summarized in chunks and may need several model requests each. Backfill shows which project it is working on before the model completes. Failed sessions are reported, other sessions continue, and the command exits nonzero if anything needs attention. Fix the issue and rerun the same command; completed summaries are reused, even if a previous attempt failed to write a daily note.
 
 Run one backfill at a time against a given journal. The extension prevents overlapping saves within one Pi process, but separate CLI/Pi processes and external note editors are not coordinated. Let an existing save or vault sync finish first.
 

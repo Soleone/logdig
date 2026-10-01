@@ -2,7 +2,7 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { listJournaledSessions } from "../src/journal.js";
+import { listJournaledSessions, summaryCachePolicy } from "../src/journal.js";
 import { collectSessions, parseBackfillArgument, writeSessions } from "../src/session-runner.js";
 import { createPiModelClient } from "../src/pi-client.js";
 import { spawnPiProcess } from "../src/pi-process.js";
@@ -164,7 +164,7 @@ async function backfill(args) {
   console.log(`Model: ${selectedModel || "Pi startup default"}`);
   console.log(dryRun
     ? "Dry run: no model requests, no file changes, and no folders created."
-    : "Only new or changed sessions need model requests. Selected, redacted history is sent to Pi's model; provider charges may apply.");
+    : "Only new or changed work blocks need summarizing. Selected, redacted history is sent to Pi's model; provider charges may apply.");
   const found = await collectSessions({ sessionDirectory: settings.sessionDirectory, timeZone: settings.timeZone, days: range.days });
   console.log(`\nFound ${found.sessions.length} saved Pi session${found.sessions.length === 1 ? "" : "s"}${found.firstDate ? ` to check for ${found.firstDate} through ${found.lastDate}` : ""}.`);
   if (found.sessions.length === 0) {
@@ -181,12 +181,13 @@ async function backfill(args) {
   const result = await writeSessions(modelClient, found.sessions, settings, {
     ...found,
     dryRun,
-    onProgress: ({ index, total, sessionId, project, date, time, status, error, phase, sessionPath, dailyPath }) => {
+    onProgress: ({ index, total, sessionId, project, date, time, status, error, phase, sessionPath, dailyPath, prerequisite }) => {
       if (["checking", "skipped"].includes(phase)) return;
       console.log(`[${index}/${total}] ${project || sessionId}${date ? ` · ${date} ${time}` : ""}: ${error || status}`);
       if (dryRun && dailyPath) {
         console.log(`  Daily note: ${dailyPath}`);
         console.log(`  Full summary: ${sessionPath}`);
+        if (prerequisite) console.log("  Includes this earlier block to establish the continuation link.");
       }
     },
   });
@@ -199,8 +200,8 @@ async function backfill(args) {
   if (result.sessionsSkipped) console.log(`${result.sessionsSkipped} session${result.sessionsSkipped === 1 ? "" : "s"} skipped (outside the date range or without journalable messages).`);
   if (result.dates.length) {
     console.log(`Daily-note dates: ${result.dates.join(", ")}`);
-    if (dryRun && result.summariesCreated) console.log(`${result.summariesCreated} session${result.summariesCreated === 1 ? "" : "s"} would need model requests. Large sessions may require multiple requests each.`);
-    if (!result.summariesCreated && !result.errors.length) console.log("These unchanged sessions need no model requests.");
+    if (dryRun && result.summariesCreated) console.log(`${result.summariesCreated} work block${result.summariesCreated === 1 ? "" : "s"} would need summarizing. Large blocks may require multiple model requests each.`);
+    if (!result.summariesCreated && !result.errors.length) console.log("These unchanged work blocks need no model requests.");
   } else if (!result.errors.length) {
     console.log(`Nothing to journal in this range. Try '${commandName} backfill 7 --dry-run' or '${commandName} backfill all --dry-run'.`);
   }
@@ -242,7 +243,7 @@ async function status(args) {
   });
   const previousEntries = await listJournaledSessions(settings.cacheDirectory);
   const inspection = await writeSessions(
-    { cacheKey: settings.model || "Pi default" },
+    { cachePolicy: summaryCachePolicy(settings) },
     found.sessions,
     settings,
     { ...found, dryRun: true, journaledEntries: previousEntries },
@@ -250,26 +251,31 @@ async function status(args) {
   const sessions = inspection.sessionResults
     .filter((session) => !["skipped", "error"].includes(session.status))
     .map((session) => {
-      const previous = previousEntries.get(session.sessionId) || [];
-      const status = session.entryPresent ? "logged" : previous.length ? "needs-update" : "missing";
-      const hasCurrentSource = previous.some((entry) => entry.sourceFingerprint === session.sourceFingerprint);
-      const sourceChanged = !hasCurrentSource && previous.some((entry) => entry.sourceFingerprint);
+      const previous = (previousEntries.get(session.sessionId) || []).filter((entry) => entry.blockId === session.blockId);
+      const status = session.entryPresent ? "logged" : previous.length ? "stale" : "new";
+      const summaryChanged = previous.length && !previous.some((entry) => entry.cacheFingerprint === session.cacheFingerprint);
       return {
         sessionId: session.sessionId,
+        blockId: session.blockId,
         project: session.project,
         date: session.date,
         time: session.time,
+        activityDates: session.activityDates,
+        prerequisite: session.prerequisite,
+        ...(session.continuationOf ? { continuationOf: session.continuationOf } : {}),
         status,
-        ...(status === "needs-update" ? {
-          reason: sourceChanged ? "session changed since its previous journal entry" : "previous journal entry is not current",
+        ...(status === "stale" ? {
+          reason: session.legacyEntry
+            ? "previous entry needs work-block migration"
+            : summaryChanged ? "work-block evidence or generation policy changed" : "previous journal entry is not current",
         } : {}),
-        summaryStatus: session.summaryReused ? "cached" : "needs-generation",
+        summaryStatus: session.summaryReused ? "reusable" : "needs-summarizing",
         dailyPath: session.dailyPath,
       };
     });
-  const needsUpdate = sessions.filter((session) => session.status === "needs-update").length;
-  const missing = sessions.filter((session) => session.status === "missing").length;
-  const needsModelRequest = sessions.filter((session) => session.summaryStatus === "needs-generation").length;
+  const stale = sessions.filter((session) => session.status === "stale").length;
+  const newCount = sessions.filter((session) => session.status === "new").length;
+  const needsSummarizing = sessions.filter((session) => session.summaryStatus === "needs-summarizing").length;
   const warnings = [...found.warnings, ...inspection.errors];
   const report = {
     timeframe: {
@@ -283,9 +289,9 @@ async function status(args) {
       scanned: found.sessions.length,
       eligible: sessions.length,
       logged: sessions.filter((session) => session.status === "logged").length,
-      needsUpdate,
-      missing,
-      needsModelRequest,
+      stale,
+      new: newCount,
+      needsSummarizing,
       skipped: inspection.sessionsSkipped,
       errors: inspection.errors.length,
     },
@@ -297,24 +303,26 @@ async function status(args) {
     console.log(JSON.stringify(report, null, 2));
   } else {
     const label = range.all ? "all saved sessions" : `last ${range.days} calendar day${range.days === 1 ? "" : "s"}`;
-    console.log(`LogDig status: ${label} (${settings.timeZone})${found.firstDate ? ` · ${found.firstDate} through ${found.lastDate}` : ""}`);
-    console.log(`${report.totals.eligible} journalable: ${report.totals.logged} current, ${needsUpdate} need updating, ${missing} missing.`);
-    console.log(`Summaries: ${report.totals.eligible - needsModelRequest} cached, ${needsModelRequest} need model requests.`);
-    const attention = sessions.filter((session) => session.status !== "logged" || session.summaryStatus !== "cached");
+    console.log(`LogDig status: activity in ${label} (${settings.timeZone})${found.firstDate ? ` · ${found.firstDate} through ${found.lastDate}` : ""}`);
+    console.log(`${report.totals.eligible} work block${report.totals.eligible === 1 ? "" : "s"}: ${report.totals.logged} logged, ${stale} stale, ${newCount} new.`);
+    console.log(`Summaries: ${report.totals.eligible - needsSummarizing} reusable, ${needsSummarizing} work block${needsSummarizing === 1 ? " needs" : "s need"} summarizing.`);
+    const prerequisites = sessions.filter((session) => session.prerequisite).length;
+    if (prerequisites) console.log(`Includes ${prerequisites} earlier block${prerequisites === 1 ? "" : "s"} needed for continuation links.`);
+    const attention = sessions.filter((session) => session.status !== "logged" || session.summaryStatus !== "reusable");
     if (attention.length) {
       console.log("\nNeeds attention:");
       for (const session of attention) {
-        const state = session.status === "logged" ? "logged" : session.reason || "not yet logged";
-        const summary = session.summaryStatus === "cached" ? "summary cached" : "summary needs a model request";
+        const state = session.status + (session.reason ? `: ${session.reason}` : "");
+        const summary = session.summaryStatus === "reusable" ? "summary reusable" : "needs summarizing";
         console.log(`- ${session.date} ${session.time} · ${session.project} · ${state}; ${summary} (${session.sessionId})`);
         console.log(`  Daily note: ${session.dailyPath}`);
       }
     } else if (!sessions.length) {
-      console.log("No journalable sessions found in this timeframe.");
+      console.log("No journalable work blocks found in this timeframe.");
     } else {
       console.log("Everything in this timeframe is current.");
     }
-    if (missing || needsUpdate || needsModelRequest) {
+    if (newCount || stale || needsSummarizing) {
       console.log(`\nTo update the journal: ${commandName} backfill ${range.all ? "all" : range.days}`);
     }
   }

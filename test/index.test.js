@@ -19,12 +19,12 @@ const environmentKeys = [
   "PI_JOURNAL_AUTO",
 ];
 
-test("journal command appends the chosen layer under the configured header at the last user time", async () => {
+test("journal command keeps continuous overnight work on its starting date and time", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "logdig-command-test-"));
   const cacheDirectory = path.join(root, "LogDig");
   const dailyDirectory = path.join(root, "My Daily Notes");
   await mkdir(dailyDirectory, { recursive: true });
-  await writeFile(path.join(dailyDirectory, "2026-09-28.md"), "# 2026-09-28\n\nMy existing note.\n\n# Log\n\nHandwritten content.\n", "utf8");
+  await writeFile(path.join(dailyDirectory, "2026-09-27.md"), "# 2026-09-27\n\nMy existing note.\n\n# Log\n\nHandwritten content.\n", "utf8");
   const previousEnvironment = Object.fromEntries(environmentKeys.map((key) => [key, process.env[key]]));
   for (const key of environmentKeys) delete process.env[key];
   Object.assign(process.env, {
@@ -102,23 +102,23 @@ test("journal command appends the chosen layer under the configured header at th
 
   try {
     await command("", ctx);
-    assert.match(notifications.at(-1), /2026-09-28/);
+    assert.match(notifications.at(-1), /2026-09-27/);
     assert.equal(modelCalls, 1);
 
-    const daily = await readFile(path.join(dailyDirectory, "2026-09-28.md"), "utf8");
+    const daily = await readFile(path.join(dailyDirectory, "2026-09-27.md"), "utf8");
     assert.ok(daily.includes("My existing note."));
     assert.ok(daily.includes("Handwritten content."));
-    assert.match(daily, /## example-project\n\n\*\*\[\[[a-f0-9]{64}\|00:01\]\]\*\*/);
+    assert.match(daily, /## example-project\n\n\*\*\[\[[a-f0-9]{64}\|22:01\]\]\*\*/);
     assert.ok(daily.includes("- **Goal:** Finish the task."));
     assert.ok(!daily.includes("Short layer should not be inserted."));
     assert.ok(!daily.includes("Long layer should remain cached"));
-    const id = daily.match(/\[\[([a-f0-9]{64})\|00:01\]\]/)[1];
+    const id = daily.match(/\[\[([a-f0-9]{64})\|22:01\]\]/)[1];
     const detailed = await readFile(path.join(cacheDirectory, "Entries", `${id}.md`), "utf8");
     assert.match(detailed, /^logUsage: "\$0\.03 ⚡300 ↑70 ↓10 · \d+s"$/m);
 
     await command("", ctx);
     assert.equal(modelCalls, 1);
-    const repeated = await readFile(path.join(dailyDirectory, "2026-09-28.md"), "utf8");
+    const repeated = await readFile(path.join(dailyDirectory, "2026-09-27.md"), "utf8");
     assert.equal((repeated.match(/\[\[[a-f0-9]{64}\|/g) || []).length, 1);
     assert.deepEqual(await readdir(path.join(cacheDirectory, "Sessions")), ["session-one.md"]);
   } finally {

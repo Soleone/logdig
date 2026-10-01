@@ -60,7 +60,7 @@ test("backfill range accepts day counts and all", () => {
   }
 });
 
-test("preview uses the last user timestamp, skips empty and out-of-range sessions, and makes no writes or model requests", async (t) => {
+test("preview anchors overnight work to its starting timestamp, skips empty and out-of-range sessions, and makes no writes or model requests", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "logdig-preview-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const settings = { cacheDirectory: path.join(root, "cache"), dailyDirectory: path.join(root, "daily"), dailyHeader: "# Log", dailySummary: "small", timeZone: "America/New_York" };

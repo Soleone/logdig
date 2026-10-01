@@ -161,7 +161,7 @@ test("shutdown capture reports per-session failures instead of silently swallowi
   } finally {
     console.error = original;
   }
-  assert.match(errors.join("\n"), /automatic capture needs attention.*\ncurrent-session: quota exceeded/);
+  assert.match(errors.join("\n"), /automatic capture needs attention.*\ncurrent-session: .*quota exceeded/);
   assert.match(errors.join("\n"), /logdig doctor/);
   assert.equal(f.statuses.at(-1).text, undefined);
   await assert.rejects(readdir(f.settings.dailyDirectory), { code: "ENOENT" });

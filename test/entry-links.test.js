@@ -136,7 +136,7 @@ test("evolving a session preserves a manually edited daily blurb", async (t) => 
   assert.equal([...dailyText.matchAll(/\[\[[a-f0-9]{64}\|\d{2}:\d{2}\]\]/g)].length, 1);
 });
 
-test("evolving a session across local dates moves its single daily entry", async (t) => {
+test("continuous overnight work updates its original daily entry instead of moving it", async (t) => {
   const { daily, cache } = await workspace(t);
   const settings = { cacheDirectory: cache, dailyDirectory: daily, dailyHeader: "# Log", dailySummary: "small", timeZone: "UTC" };
   const session = {
@@ -157,10 +157,9 @@ test("evolving a session across local dates moves its single daily entry", async
   session.entries.push({ type: "message", timestamp: "2026-09-29T00:10:00Z", message: { role: "user", content: "Continue work." } });
   const updated = await writeSessions(model, [session], settings);
   assert.equal(updated.entriesUpdated, 1);
-  const newDaily = await readFile(path.join(daily, "2026-09-29.md"), "utf8");
-  const cleanedOldDaily = await readFile(oldDailyPath, "utf8");
-  assert.doesNotMatch(cleanedOldDaily, /\[\[[a-f0-9]{64}\|23:50\]\]/);
-  assert.doesNotMatch(cleanedOldDaily, /^## demo$/m);
+  const newDaily = await readFile(oldDailyPath, "utf8");
+  await assert.rejects(readFile(path.join(daily, "2026-09-29.md")), { code: "ENOENT" });
+  assert.match(newDaily, /^## demo$/m);
   const ids = [...newDaily.matchAll(/\[\[([a-f0-9]{64})\|\d{2}:\d{2}\]\]/g)].map((match) => match[1]);
   assert.equal(ids.length, 1);
   assert.notEqual(ids[0], oldId);

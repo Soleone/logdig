@@ -59,6 +59,7 @@ test("Pi client makes a one-shot, no-tools, no-session request and honors model 
   assert.ok(launch.args.includes("--"));
   assert.equal(fake.getInput(), "redacted journal prompt");
   assert.equal(client.modelLabel, "openai/gpt-4.1");
+  assert.deepEqual(client.cachePolicy, { model: "openai/gpt-4.1" });
 });
 
 test("Pi client leaves model selection to Pi when no override is configured", async () => {
@@ -67,6 +68,7 @@ test("Pi client leaves model selection to Pi when no override is configured", as
   await client.complete("prompt");
   assert.equal(fake.getLaunch().args.includes("--model"), false);
   assert.equal(client.modelLabel, "Pi startup default");
+  assert.deepEqual(client.cachePolicy, { model: "Pi default" });
 });
 
 test("Pi client aggregates completed responses and rejects failed JSON runs", async () => {

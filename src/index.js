@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { JOURNAL_SYSTEM_PROMPT } from "./journal.js";
+import { JOURNAL_SYSTEM_PROMPT, summaryCachePolicy } from "./journal.js";
 import { collectSessions, parseBackfillArgument, writeSessions } from "./session-runner.js";
 import { loadSettings } from "./settings.js";
-import { fingerprintSession } from "./transcript.js";
 
 function requireJournalSettings(settings) {
   if (!settings.cacheDirectory) throw new Error("Run 'logdig init' or set PI_JOURNAL_DIR to a LogDig cache folder");
@@ -23,7 +22,6 @@ function currentSession(ctx) {
     entries: ctx.sessionManager.getEntries(),
     sourcePath: ctx.sessionManager.getSessionFile() || "active Pi session",
   };
-  session.fingerprint = fingerprintSession(session);
   return session;
 }
 
@@ -37,7 +35,7 @@ function extensionModelClient(ctx, settings) {
 
   return {
     modelLabel: model ? `${model.provider}/${model.id}` : "Pi current model",
-    cacheKey: settings.model || "Pi default",
+    cachePolicy: summaryCachePolicy(settings),
     complete: async (prompt) => {
       if (!model) throw new Error("Pi has no active model for journal generation");
       if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
@@ -88,7 +86,7 @@ async function runBackfill(ctx, argument) {
     days: range.days,
     currentSession: currentSession(ctx),
   });
-  const client = dryRun ? { cacheKey: settings.model || "Pi default" } : extensionModelClient(ctx, settings);
+  const client = dryRun ? { cachePolicy: summaryCachePolicy(settings) } : extensionModelClient(ctx, settings);
   const result = await writeSessions(client, found.sessions, settings, { ...found, dryRun, onProgress: journalProgress(ctx) });
   const warnings = [...found.warnings, ...result.errors];
   const summaryCount = `${result.summariesCreated} ${result.summariesCreated === 1 ? "summary" : "summaries"}`;

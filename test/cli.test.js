@@ -242,17 +242,18 @@ test("a dry run reports project, date, output file, and new summaries without ca
   await assert.rejects(readdir(w.settings.dailyDirectory), { code: "ENOENT" });
 });
 
-test("status reports missing, logged, and updated sessions without writes or model calls", async (t) => {
+test("status reports new, logged, and stale work blocks without writes or model calls", async (t) => {
   const w = await workspace(t);
   const date = await addSession(w.settings);
   const missing = await runCli(["status", "1", "--json"], w.env);
   assert.equal(missing.code, 0, missing.stderr);
   const missingReport = JSON.parse(missing.stdout);
   assert.deepEqual(missingReport.totals, {
-    scanned: 1, eligible: 1, logged: 0, needsUpdate: 0, missing: 1, needsModelRequest: 1, skipped: 0, errors: 0,
+    scanned: 1, eligible: 1, logged: 0, stale: 0, new: 1, needsSummarizing: 1, skipped: 0, errors: 0,
   });
-  assert.equal(missingReport.sessions[0].status, "missing");
-  assert.equal(missingReport.sessions[0].summaryStatus, "needs-generation");
+  assert.equal(missingReport.sessions[0].status, "new");
+  assert.equal(missingReport.sessions[0].summaryStatus, "needs-summarizing");
+  assert.match(missingReport.sessions[0].blockId, /^[a-f0-9]{64}$/);
   assert.deepEqual(await calls(w.callsPath), []);
   await assert.rejects(readdir(w.settings.cacheDirectory), { code: "ENOENT" });
   await assert.rejects(readdir(w.settings.dailyDirectory), { code: "ENOENT" });
@@ -261,7 +262,7 @@ test("status reports missing, logged, and updated sessions without writes or mod
   assert.equal(saved.code, 0, saved.stderr);
   const current = await runCli(["status", "1"], w.env);
   assert.equal(current.code, 0, current.stderr);
-  assert.match(current.stdout, /1 journalable: 1 current, 0 need updating, 0 missing/);
+  assert.match(current.stdout, /1 work block: 1 logged, 0 stale, 0 new/);
   assert.match(current.stdout, /Everything in this timeframe is current/);
 
   const sessionPath = path.join(w.settings.sessionDirectory, "demo-session.jsonl");
@@ -277,11 +278,71 @@ test("status reports missing, logged, and updated sessions without writes or mod
   const changed = await runCli(["status", "1", "--json"], w.env);
   assert.equal(changed.code, 0, changed.stderr);
   const changedReport = JSON.parse(changed.stdout);
-  assert.equal(changedReport.sessions[0].status, "needs-update");
-  assert.match(changedReport.sessions[0].reason, /session changed/);
-  assert.equal(changedReport.sessions[0].summaryStatus, "needs-generation");
+  assert.equal(changedReport.sessions[0].status, "stale");
+  assert.match(changedReport.sessions[0].reason, /evidence or generation policy changed/);
+  assert.equal(changedReport.sessions[0].summaryStatus, "needs-summarizing");
   assert.equal(await readFile(dailyPath, "utf8"), dailyBefore);
   assert.equal((await calls(w.callsPath)).length, 1);
+});
+
+test("CLI status distinguishes overnight stale work from a new continuation and ignores bookkeeping changes", async (t) => {
+  const w = await workspace(t);
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86400_000).toISOString().slice(0, 10);
+  await addSession(w.settings, { timestamp: Date.parse(`${yesterday}T22:00:00Z`) });
+  assert.equal((await runCli(["backfill", "all"], w.env)).code, 0);
+  const dailyPath = path.join(w.settings.dailyDirectory, `${yesterday}.md`);
+  const before = await readFile(dailyPath, "utf8");
+  const sessionPath = path.join(w.settings.sessionDirectory, "demo-session.jsonl");
+  const original = await readFile(sessionPath, "utf8");
+  const updated = [
+    { type: "message", id: "overnight-result", timestamp: `${today}T02:00:00Z`, message: { role: "assistant", content: "Finished overnight.", stopReason: "stop" } },
+    { type: "message", id: "resume", timestamp: `${today}T11:00:00Z`, message: { role: "user", content: "Start the next stage." } },
+  ];
+  await writeFile(sessionPath, `${original}\n${updated.map(JSON.stringify).join("\n")}\n`);
+  const status = await runCli(["status", "1", "--json"], w.env);
+  assert.equal(status.code, 0, status.stderr);
+  const report = JSON.parse(status.stdout);
+  assert.deepEqual(report.sessions.map((block) => [block.date, block.status]), [[yesterday, "stale"], [today, "new"]]);
+  assert.equal(new Set(report.sessions.map((block) => block.blockId)).size, 2);
+  assert.equal(report.totals.needsSummarizing, 2);
+  assert.equal((await calls(w.callsPath)).length, 1);
+  assert.equal(await readFile(dailyPath, "utf8"), before);
+  assert.equal((await runCli(["backfill", "1"], w.env)).code, 0);
+  const logged = await runCli(["status", "1"], w.env);
+  assert.match(logged.stdout, /2 work blocks: 2 logged, 0 stale, 0 new/);
+  assert.match(logged.stdout, /Summaries: 2 reusable, 0 work blocks need summarizing/);
+  const laterDaily = await readFile(path.join(w.settings.dailyDirectory, `${today}.md`), "utf8");
+  const continuation = laterDaily.match(/Continues \[\[([a-f0-9]{64})\|previous entry\]\]/)[1];
+  await readFile(path.join(w.settings.cacheDirectory, "Entries", `${continuation}.md`));
+  const beforeMetadata = await readFile(sessionPath, "utf8");
+  await writeFile(sessionPath, `${beforeMetadata}${JSON.stringify({ type: "session_info", timestamp: `${today}T12:00:00Z`, name: "Renamed" })}\n`);
+  const unchanged = JSON.parse((await runCli(["status", "1", "--json"], w.env)).stdout);
+  assert.equal(unchanged.totals.logged, 2);
+  assert.equal(unchanged.totals.needsSummarizing, 0);
+  assert.equal((await calls(w.callsPath)).length, 3);
+});
+
+test("CLI status and preview expose missing continuation prerequisites without generating or writing summaries", async (t) => {
+  const w = await workspace(t);
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86400_000).toISOString().slice(0, 10);
+  await addSession(w.settings, { timestamp: Date.parse(`${yesterday}T22:00:00Z`) });
+  const sessionPath = path.join(w.settings.sessionDirectory, "demo-session.jsonl");
+  const original = await readFile(sessionPath, "utf8");
+  await writeFile(sessionPath, `${original}\n${JSON.stringify({ type: "message", id: "resume", timestamp: `${today}T11:00:00Z`, message: { role: "user", content: "Continue." } })}\n`);
+  const report = JSON.parse((await runCli(["status", "1", "--json"], w.env)).stdout);
+  assert.deepEqual(report.sessions.map((block) => block.prerequisite), [true, false]);
+  assert.equal(report.totals.new, 2);
+  const status = await runCli(["status", "1"], w.env);
+  assert.match(status.stdout, /Includes 1 earlier block needed for continuation links/);
+  const preview = await runCli(["backfill", "1", "--dry-run"], w.env);
+  assert.equal(preview.code, 0, preview.stderr);
+  assert.match(preview.stdout, /earlier block needed for continuation link/);
+  assert.match(preview.stdout, /Would create 2 summaries/);
+  assert.deepEqual(await calls(w.callsPath), []);
+  await assert.rejects(readdir(w.settings.cacheDirectory), { code: "ENOENT" });
+  await assert.rejects(readdir(w.settings.dailyDirectory), { code: "ENOENT" });
 });
 
 test("status reports malformed history as incomplete JSON and validates its arguments", async (t) => {

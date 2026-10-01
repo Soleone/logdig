@@ -33,9 +33,9 @@ logdig status 7
 logdig backfill 1 --dry-run
 ```
 
-`status` shows what's already journaled, what needs updating or is missing, and which summaries would need a model request. It is read-only. The backfill preview shows projects, dates, destination files, cache hits, and which sessions need summarizing. **Neither command makes model requests or changes files.** The preview does not display transcript excerpts.
+`status` counts **logged**, **stale**, and **new** work blocks, with reusable summaries counted separately from blocks needing summarization. It is read-only. The backfill preview shows projects, dates, destination files, cache hits, and which blocks need summarizing. **Neither command makes model requests or changes files.** The preview does not display transcript excerpts.
 
-`1` means today in your chosen timezone. If nothing happened today:
+`1` means conversation activity today in your chosen timezone. Continuous overnight work stays on its starting day, so today's backfill may update yesterday's note. Resuming on a later date after at least four hours without conversation activity starts a linked continuation entry. If its preceding snapshot is missing, preview explicitly includes the earlier block needed for that link. If nothing happened today:
 
 ```sh
 logdig backfill 7 --dry-run
@@ -53,9 +53,11 @@ logdig backfill 1
 
 This may send selected, redacted history to your Pi model and incur provider charges. Pi uses its existing authentication. If authentication fails, open Pi, run `/login`, then retry. Common secrets are redacted, but redaction is not a complete secret scanner.
 
-Open the daily-note date printed by the command. You will find project subheadings under `# Projects`, with timestamped summaries grouped beneath each one. Your existing text stays in place. Click a timestamp to open that entry's saved snapshot of all three summary lengths, or browse `<cache folder>/Sessions/<session-id>.md` for the latest session summary.
+Open the daily-note date printed by the command. You will find project subheadings under `# Projects`, with timestamped summaries grouped beneath each one. Your existing text stays in place. Click a timestamp to open that entry's saved snapshot of all three summary lengths, or browse `<cache folder>/Sessions/` for the latest work-block summaries.
 
-Repeating an unchanged session reuses its summary and does not insert that entry again. If a session evolves, LogDig updates its existing daily row to the latest summary, preserving manually edited blurbs and keeping older snapshots in `Entries/`. Run only one save at a time against your journal, and let vault sync finish first.
+Repeating unchanged work reuses its summary and does not insert that entry again. Session renames and other bookkeeping do not trigger regeneration. New work in the same block updates that block's row; continuation blocks get separate linked entries. Manually edited blurbs and older snapshots in `Entries/` are preserved. Run only one save at a time against your journal, and let vault sync finish first.
+
+If you used the older whole-session journal format, the first real save regenerates summaries for selected work blocks and migrates the old rows while keeping their linked snapshots. Preview before saving to check the dates and model work.
 
 ## Optional: use `/journal` inside Pi
 

@@ -1,5 +1,5 @@
 import os from "node:os";
-import { JOURNAL_SYSTEM_PROMPT } from "./journal.js";
+import { JOURNAL_SYSTEM_PROMPT, summaryCachePolicy } from "./journal.js";
 import { spawnPiProcess } from "./pi-process.js";
 
 const MODEL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -121,7 +121,7 @@ function runPiPrompt(prompt, settings, spawnProcess) {
 export function createPiModelClient(settings, options = {}) {
   return {
     modelLabel: settings.model || "Pi startup default",
-    cacheKey: settings.model || "Pi default",
+    cachePolicy: summaryCachePolicy(settings),
     complete: (prompt) => runPiPrompt(prompt, settings, options.spawnProcess),
   };
 }

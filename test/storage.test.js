@@ -49,9 +49,9 @@ test("default model caches remain compatible while explicit model choices get se
   const { modelClient, calls } = modelContext();
   const first = session("session-model", "alpha", "09:00", "same-source");
   try {
-    const initial = await saveSessionSummary({ ...modelClient, cacheKey: "Pi default" }, root, first);
+    const initial = await saveSessionSummary({ ...modelClient, cachePolicy: { model: "Pi default" } }, root, first);
     assert.equal(initial.reused, false);
-    const selected = { ...modelClient, modelLabel: "test/other", cacheKey: "test/other" };
+    const selected = { ...modelClient, modelLabel: "test/other", cachePolicy: { model: "test/other" } };
     const switched = await saveSessionSummary(selected, root, first);
     assert.equal(switched.reused, false);
     const repeated = await saveSessionSummary(selected, root, first);
