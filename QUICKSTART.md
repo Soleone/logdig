@@ -55,7 +55,7 @@ This may send selected, redacted history to your Pi model and incur provider cha
 
 Open the daily-note date printed by the command. You will find project subheadings under `# Projects`, with timestamped summaries grouped beneath each one. Your existing text stays in place. Click a timestamp to open that entry's saved snapshot of all three summary lengths, or browse `<cache folder>/Sessions/<session-id>.md` for the latest session summary.
 
-Repeating an unchanged session reuses its summary and does not insert that entry again. Updated sessions or changed summary settings can append a new version. Run only one save at a time against your journal, and let vault sync finish first.
+Repeating an unchanged session reuses its summary and does not insert that entry again. If a session evolves, LogDig updates its existing daily row to the latest summary, preserving manually edited blurbs and keeping older snapshots in `Entries/`. Run only one save at a time against your journal, and let vault sync finish first.
 
 ## Optional: use `/journal` inside Pi
 

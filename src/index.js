@@ -93,9 +93,10 @@ async function runBackfill(ctx, argument) {
   const warnings = [...found.warnings, ...result.errors];
   const summaryCount = `${result.summariesCreated} ${result.summariesCreated === 1 ? "summary" : "summaries"}`;
   const entryCount = `${result.entriesAppended} daily ${result.entriesAppended === 1 ? "entry" : "entries"}`;
+  const updateCount = `${result.entriesUpdated} ${result.entriesUpdated === 1 ? "entry" : "entries"}`;
   const summary = dryRun
-    ? `LogDig preview: would create ${summaryCount}, reuse ${result.summariesReused}, append ${entryCount}; ${result.entriesSkipped} already present.`
-    : `LogDig: ${summaryCount} created, ${result.summariesReused} reused, ${entryCount} appended; ${result.entriesSkipped} already present.`;
+    ? `LogDig preview: would create ${summaryCount}, reuse ${result.summariesReused}, append ${entryCount}; ${result.entriesSkipped} already present; update ${updateCount}.`
+    : `LogDig: ${summaryCount} created, ${result.summariesReused} reused, appended ${entryCount}; ${result.entriesSkipped} already present; updated ${updateCount}.`;
   const details = warnings.length
     ? `\n${warnings.slice(0, 3).join("\n")}${warnings.length > 3 ? `\n${warnings.length - 3} more warnings in the console.` : ""}\nFix the issues and rerun; successful summaries are cached.`
     : result.dates.length ? `\nDaily notes: ${settings.dailyDirectory} (${result.dates.join(", ")})` : "\nNothing to journal in this range. Try /journal backfill 7 --dry-run.";
@@ -121,7 +122,7 @@ function helpText() {
 export default function (pi) {
   let saving = false;
   pi.registerCommand("journal", {
-    description: "Cache layered session summaries and append to Obsidian journals",
+    description: "Cache layered session summaries and keep Obsidian journal entries current",
     handler: async (argument, ctx) => {
       const [command, ...rest] = argument.trim().split(/\s+/).filter(Boolean);
       if (["help", "--help", "-h"].includes(command)) {
@@ -151,7 +152,8 @@ export default function (pi) {
         if (!result.dailyPaths.length) {
           notify(ctx, "Nothing to journal yet. Send a message to Pi, then run /journal.");
         } else {
-          notify(ctx, `${result.entriesAppended ? `Saved ${settings.dailySummary} summary` : "Already in your journal"}: ${result.dailyPaths.join(", ")}\nFull summaries: ${path.join(settings.cacheDirectory, "Sessions")}`, "success");
+          const saved = result.entriesAppended || result.entriesUpdated;
+          notify(ctx, `${saved ? `Saved ${settings.dailySummary} summary` : "Already in your journal"}: ${result.dailyPaths.join(", ")}\nFull summaries: ${path.join(settings.cacheDirectory, "Sessions")}`, "success");
         }
       } catch (error) {
         notify(ctx, `LogDig could not save: ${error.message}`, "error");

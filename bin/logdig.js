@@ -187,9 +187,10 @@ async function backfill(args) {
   });
   const summaryCount = `${result.summariesCreated} ${result.summariesCreated === 1 ? "summary" : "summaries"}`;
   const entryCount = `${result.entriesAppended} daily ${result.entriesAppended === 1 ? "entry" : "entries"}`;
+  const updateCount = `${result.entriesUpdated} ${result.entriesUpdated === 1 ? "entry" : "entries"}`;
   console.log(dryRun
-    ? `\nWould create ${summaryCount}, reuse ${result.summariesReused}, append ${entryCount}; ${result.entriesSkipped} already present.`
-    : `\nSaved: ${summaryCount} created, ${result.summariesReused} reused, ${entryCount} appended; ${result.entriesSkipped} already present.`);
+    ? `\nWould create ${summaryCount}, reuse ${result.summariesReused}, append ${entryCount}; ${result.entriesSkipped} already present; update ${updateCount}.`
+    : `\nSaved: ${summaryCount} created, ${result.summariesReused} reused, appended ${entryCount}; ${result.entriesSkipped} already present; updated ${updateCount}.`);
   if (result.sessionsSkipped) console.log(`${result.sessionsSkipped} session${result.sessionsSkipped === 1 ? "" : "s"} skipped (outside the date range or without journalable messages).`);
   if (result.dates.length) {
     console.log(`Daily-note dates: ${result.dates.join(", ")}`);
@@ -234,13 +235,13 @@ async function status(args) {
     timeZone: settings.timeZone,
     days: range.days,
   });
+  const previousEntries = await listJournaledSessions(settings.cacheDirectory);
   const inspection = await writeSessions(
     { cacheKey: settings.model || "Pi default" },
     found.sessions,
     settings,
-    { ...found, dryRun: true },
+    { ...found, dryRun: true, journaledEntries: previousEntries },
   );
-  const previousEntries = await listJournaledSessions(settings.cacheDirectory);
   const sessions = inspection.sessionResults
     .filter((session) => !["skipped", "error"].includes(session.status))
     .map((session) => {

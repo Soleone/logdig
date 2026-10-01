@@ -322,6 +322,37 @@ test("real CLI backfill preserves handwritten notes, gives progress, and repeats
   assert.equal((await calls(w.callsPath)).length, 1);
 });
 
+test("CLI backfill updates an evolving session row and keeps a hand-edited blurb", async (t) => {
+  const w = await workspace(t);
+  const date = await addSession(w.settings);
+  const first = await runCli(["backfill", "1"], w.env);
+  assert.equal(first.code, 0, first.stderr);
+  const dailyPath = path.join(w.settings.dailyDirectory, `${date}.md`);
+  const initialDaily = await readFile(dailyPath, "utf8");
+  const firstId = initialDaily.match(/\[\[([a-f0-9]{64})\|/)[1];
+  const firstSnapshotPath = path.join(w.settings.cacheDirectory, "Entries", `${firstId}.md`);
+  const firstSnapshot = await readFile(firstSnapshotPath, "utf8");
+  await writeFile(dailyPath, initialDaily.replace("Improved the demo and verified its tests.", "My edited summary."));
+
+  const sessionPath = path.join(w.settings.sessionDirectory, "demo-session.jsonl");
+  const followup = JSON.stringify({
+    type: "message",
+    timestamp: Date.now(),
+    message: { role: "user", content: "Add a follow-up to this same session." },
+  });
+  await writeFile(sessionPath, `${(await readFile(sessionPath, "utf8")).trimEnd()}\n${followup}\n`);
+  const updated = await runCli(["backfill", "1"], w.env);
+  assert.equal(updated.code, 0, updated.stderr);
+  assert.match(updated.stdout, /updated 1 entry/);
+  const daily = await readFile(dailyPath, "utf8");
+  const ids = [...daily.matchAll(/\[\[([a-f0-9]{64})\|\d{2}:\d{2}\]\]/g)].map((match) => match[1]);
+  assert.equal(ids.length, 1);
+  assert.notEqual(ids[0], firstId);
+  assert.match(daily, /My edited summary\./);
+  assert.equal(await readFile(firstSnapshotPath, "utf8"), firstSnapshot);
+  assert.equal((await calls(w.callsPath)).length, 2);
+});
+
 test("model failure is visible, exits nonzero, and explains how to retry without touching daily notes", async (t) => {
   const w = await workspace(t);
   await addSession(w.settings);

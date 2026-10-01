@@ -1,6 +1,6 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { appendDailyEntry, inspectDailyEntry, inspectSessionSummary, saveSessionSummary } from "./journal.js";
+import { appendDailyEntry, inspectDailyEntry, inspectSessionSummary, listJournaledSessions, saveSessionSummary } from "./journal.js";
 import { eventsForSession, fingerprintSession, sessionFromJsonl, sessionMetrics } from "./transcript.js";
 
 function localDate(timestamp, timeZone) {
@@ -100,12 +100,14 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
   let summariesCreated = 0;
   let summariesReused = 0;
   let entriesAppended = 0;
+  let entriesUpdated = 0;
   let entriesSkipped = 0;
   let sessionsSkipped = 0;
   const dates = new Set();
   const dailyPaths = new Set();
   const errors = [];
   const sessionResults = [];
+  const journaledEntries = range.journaledEntries || await listJournaledSessions(settings.cacheDirectory);
 
   for (const [index, session] of sessions.entries()) {
     const progress = { index: index + 1, total: sessions.length, sessionId: session.header.id };
@@ -153,16 +155,18 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
         summary: cached.summary?.[settings.dailySummary],
       };
       const dailyEntry = range.dryRun
-        ? await inspectDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry)
-        : await appendDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry);
-      if (dailyEntry.appended) entriesAppended++;
+        ? await inspectDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry, journaledEntries)
+        : await appendDailyEntry(settings.dailyDirectory, settings.dailyHeader, entry, journaledEntries);
+      if (dailyEntry.updated) entriesUpdated++;
+      else if (dailyEntry.appended) entriesAppended++;
       else entriesSkipped++;
       sessionResults.push({
         sessionId: journalSession.header.id,
         project: journalSession.project,
         date: journalSession.date,
         time: journalSession.time,
-        entryPresent: !dailyEntry.appended,
+        entryPresent: !dailyEntry.appended && !dailyEntry.updated,
+        entryUpdated: Boolean(dailyEntry.updated),
         summaryReused: cached.reused,
         sourceFingerprint: journalSession.sourceFingerprint,
         sessionPath: cached.sessionPath,
@@ -176,8 +180,8 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
         sessionPath: cached.sessionPath,
         dailyPath: dailyEntry.dailyPath,
         status: range.dryRun
-          ? `${cached.reused ? "would reuse summary" : "would summarize with Pi"}, ${dailyEntry.appended ? "would append entry" : "entry already present"}`
-          : `${cached.reused ? "summary reused" : "summary created"}, ${dailyEntry.appended ? "entry appended" : "entry already present"}`,
+          ? `${cached.reused ? "would reuse summary" : "would summarize with Pi"}, ${dailyEntry.updated ? "would update entry" : dailyEntry.appended ? "would append entry" : "entry already present"}`
+          : `${cached.reused ? "summary reused" : "summary created"}, ${dailyEntry.updated ? "entry updated" : dailyEntry.appended ? "entry appended" : "entry already present"}`,
       });
     } catch (error) {
       errors.push(`${session.header.id}: ${error.message}`);
@@ -186,7 +190,7 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
     }
   }
 
-  return { summariesCreated, summariesReused, entriesAppended, entriesSkipped, sessionsSkipped, dates: [...dates].sort(), dailyPaths: [...dailyPaths].sort(), errors, sessionResults };
+  return { summariesCreated, summariesReused, entriesAppended, entriesUpdated, entriesSkipped, sessionsSkipped, dates: [...dates].sort(), dailyPaths: [...dailyPaths].sort(), errors, sessionResults };
 }
 
 export function parseBackfillArgument(argument = "", command = "backfill") {

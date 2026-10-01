@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { appendDailyEntry, dailyEntryId, inspectDailyEntry, parseSessionNote } from "../src/journal.js";
+import { appendDailyEntry, dailyEntryId, inspectDailyEntry, parseSessionNote, renderSessionNote } from "../src/journal.js";
 import { writeSessions } from "../src/session-runner.js";
 
 async function workspace(t) {
@@ -18,7 +18,7 @@ async function workspace(t) {
   return { root, daily, cache, entry };
 }
 
-test("timestamp links open immutable three-layer snapshots as a session changes", async (t) => {
+test("evolving a session replaces its daily entry and retains the previous immutable snapshot", async (t) => {
   const { daily, cache } = await workspace(t);
   const settings = { cacheDirectory: cache, dailyDirectory: daily, dailyHeader: "# Log", dailySummary: "small", timeZone: "UTC" };
   const session = {
@@ -37,14 +37,22 @@ test("timestamp links open immutable three-layer snapshots as a session changes"
   const original = await readFile(firstPath, "utf8");
   assert.deepEqual(parseSessionNote(original).summary, { small: "Change 1.", medium: "Details 1.", large: "Timeline 1." });
 
+  const firstDaily = await readFile(dailyPath, "utf8");
   session.entries.push({ type: "message", timestamp: "2026-09-28T10:00:00Z", message: { role: "user", content: "Second change." } });
-  assert.deepEqual((await writeSessions(model, [session], settings)).errors, []);
+  const preview = await writeSessions(model, [session], settings, { dryRun: true });
+  assert.equal(preview.entriesUpdated, 1);
+  assert.equal(calls, 1);
+  assert.equal(await readFile(dailyPath, "utf8"), firstDaily);
+  const updated = await writeSessions(model, [session], settings);
+  assert.deepEqual(updated.errors, []);
+  assert.equal(updated.entriesUpdated, 1);
   const dailyText = await readFile(dailyPath, "utf8");
   const ids = [...dailyText.matchAll(/\[\[([a-f0-9]{64})\|\d{2}:\d{2}\]\]/g)].map((match) => match[1]);
-  assert.equal(ids.length, 2);
-  assert.notEqual(ids[0], ids[1]);
+  assert.equal(ids.length, 1);
+  assert.notEqual(ids[0], firstId);
+  assert.match(dailyText, /Change 2\./);
   assert.equal(await readFile(firstPath, "utf8"), original);
-  const latest = await readFile(path.join(cache, "Entries", `${ids[1]}.md`), "utf8");
+  const latest = await readFile(path.join(cache, "Entries", `${ids[0]}.md`), "utf8");
   assert.equal(parseSessionNote(latest).summary.small, "Change 2.");
   assert.equal(latest, await readFile(path.join(cache, "Sessions", "versioned.md"), "utf8"));
   assert.equal((await writeSessions(model, [session], settings, { dryRun: true })).entriesSkipped, 1);
@@ -52,6 +60,112 @@ test("timestamp links open immutable three-layer snapshots as a session changes"
   assert.equal(calls, 2);
   assert.equal(await readFile(dailyPath, "utf8"), dailyText);
   assert.equal((await readdir(path.join(cache, "Entries"))).length, 2);
+});
+
+test("evolving a legacy duplicate session collapses its daily rows and keeps prior snapshots", async (t) => {
+  const { daily, cache } = await workspace(t);
+  const settings = { cacheDirectory: cache, dailyDirectory: daily, dailyHeader: "# Log", dailySummary: "small", timeZone: "UTC" };
+  const session = {
+    header: { id: "dedupe-session", cwd: "/work/demo" },
+    entries: [{ type: "message", timestamp: "2026-09-28T09:00:00Z", message: { role: "user", content: "First change." } }],
+  };
+  let calls = 0;
+  const model = { complete: async () => {
+    calls++;
+    return JSON.stringify({ small: `Latest ${calls}.`, medium: `Details ${calls}.`, large: `Timeline ${calls}.` });
+  } };
+  assert.deepEqual((await writeSessions(model, [session], settings)).errors, []);
+
+  const dailyPath = path.join(daily, "2026-09-28.md");
+  const firstDaily = await readFile(dailyPath, "utf8");
+  const firstId = firstDaily.match(/\[\[([a-f0-9]{64})\|09:00\]\]/)[1];
+  const firstSnapshotPath = path.join(cache, "Entries", `${firstId}.md`);
+  const firstSnapshot = await readFile(firstSnapshotPath, "utf8");
+  session.entries.push({ type: "message", timestamp: "2026-09-28T10:00:00Z", message: { role: "user", content: "Second change." } });
+
+  const legacyId = dailyEntryId({ sessionId: session.header.id, cacheFingerprint: "legacy-version", summaryLevel: "small" }, "# Log");
+  const legacySummary = { small: "Old duplicate.", medium: "Old details.", large: "Old timeline." };
+  const legacySnapshot = renderSessionNote({
+    header: session.header,
+    date: "2026-09-28",
+    time: "10:00",
+    timezone: "UTC",
+    project: "demo",
+    sourceFingerprint: "legacy-source",
+    entries: session.entries.slice(0, 1),
+  }, legacySummary, "legacy-version", "test/fake");
+  const legacySnapshotPath = path.join(cache, "Entries", `${legacyId}.md`);
+  await writeFile(legacySnapshotPath, legacySnapshot);
+  await writeFile(dailyPath, `${firstDaily.trimEnd()}\n\n**[[${legacyId}|10:00]]**\n\nOld duplicate.\n`);
+
+  const updated = await writeSessions(model, [session], settings);
+  assert.deepEqual(updated.errors, []);
+  assert.equal(updated.entriesUpdated, 1);
+  const dailyText = await readFile(dailyPath, "utf8");
+  const ids = [...dailyText.matchAll(/\[\[([a-f0-9]{64})\|\d{2}:\d{2}\]\]/g)].map((match) => match[1]);
+  assert.equal(ids.length, 1);
+  assert.match(dailyText, /Latest 2\./);
+  assert.doesNotMatch(dailyText, /Old duplicate/);
+  assert.equal(await readFile(firstSnapshotPath, "utf8"), firstSnapshot);
+  assert.equal(await readFile(legacySnapshotPath, "utf8"), legacySnapshot);
+  assert.equal((await readdir(path.join(cache, "Entries"))).length, 3);
+});
+
+test("evolving a session preserves a manually edited daily blurb", async (t) => {
+  const { daily, cache } = await workspace(t);
+  const settings = { cacheDirectory: cache, dailyDirectory: daily, dailyHeader: "# Log", dailySummary: "small", timeZone: "UTC" };
+  const session = {
+    header: { id: "edited-session", cwd: "/work/demo" },
+    entries: [{ type: "message", timestamp: "2026-09-28T09:00:00Z", message: { role: "user", content: "First change." } }],
+  };
+  let calls = 0;
+  const model = { complete: async () => {
+    calls++;
+    return JSON.stringify({ small: `Generated ${calls}.`, medium: `Details ${calls}.`, large: `Timeline ${calls}.` });
+  } };
+  await writeSessions(model, [session], settings);
+  const dailyPath = path.join(daily, "2026-09-28.md");
+  const original = await readFile(dailyPath, "utf8");
+  await writeFile(dailyPath, original.replace("Generated 1.", "My edited note."));
+  session.entries.push({ type: "message", timestamp: "2026-09-28T10:00:00Z", message: { role: "user", content: "Second change." } });
+  const updated = await writeSessions(model, [session], settings);
+  assert.equal(updated.entriesUpdated, 1);
+  const dailyText = await readFile(dailyPath, "utf8");
+  assert.match(dailyText, /My edited note\./);
+  assert.doesNotMatch(dailyText, /Generated 1\./);
+  assert.equal([...dailyText.matchAll(/\[\[[a-f0-9]{64}\|\d{2}:\d{2}\]\]/g)].length, 1);
+});
+
+test("evolving a session across local dates moves its single daily entry", async (t) => {
+  const { daily, cache } = await workspace(t);
+  const settings = { cacheDirectory: cache, dailyDirectory: daily, dailyHeader: "# Log", dailySummary: "small", timeZone: "UTC" };
+  const session = {
+    header: { id: "overnight-session", cwd: "/work/demo" },
+    entries: [{ type: "message", timestamp: "2026-09-28T23:50:00Z", message: { role: "user", content: "Start work." } }],
+  };
+  let calls = 0;
+  const model = { complete: async () => {
+    calls++;
+    return JSON.stringify({ small: `Day ${calls}.`, medium: `Details ${calls}.`, large: `Timeline ${calls}.` });
+  } };
+  await writeSessions(model, [session], settings);
+  const oldDailyPath = path.join(daily, "2026-09-28.md");
+  const oldDaily = await readFile(oldDailyPath, "utf8");
+  const oldId = oldDaily.match(/\[\[([a-f0-9]{64})\|23:50\]\]/)[1];
+  const oldSnapshot = await readFile(path.join(cache, "Entries", `${oldId}.md`), "utf8");
+
+  session.entries.push({ type: "message", timestamp: "2026-09-29T00:10:00Z", message: { role: "user", content: "Continue work." } });
+  const updated = await writeSessions(model, [session], settings);
+  assert.equal(updated.entriesUpdated, 1);
+  const newDaily = await readFile(path.join(daily, "2026-09-29.md"), "utf8");
+  const cleanedOldDaily = await readFile(oldDailyPath, "utf8");
+  assert.doesNotMatch(cleanedOldDaily, /\[\[[a-f0-9]{64}\|23:50\]\]/);
+  assert.doesNotMatch(cleanedOldDaily, /^## demo$/m);
+  const ids = [...newDaily.matchAll(/\[\[([a-f0-9]{64})\|\d{2}:\d{2}\]\]/g)].map((match) => match[1]);
+  assert.equal(ids.length, 1);
+  assert.notEqual(ids[0], oldId);
+  assert.match(newDaily, /Day 2\./);
+  assert.equal(await readFile(path.join(cache, "Entries", `${oldId}.md`), "utf8"), oldSnapshot);
 });
 
 test("reusing legacy cache adds usage to existing snapshots without model calls or journal edits", async (t) => {
