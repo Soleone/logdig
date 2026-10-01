@@ -376,8 +376,9 @@ test("real CLI backfill preserves handwritten notes, gives progress, and repeats
   await writeFile(dailyPath, original);
   const first = await runCli(["backfill", "1"], w.env);
   assert.equal(first.code, 0, first.stderr);
-  assert.match(first.stdout, /\[1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project · SUMMARIZING/);
-  assert.match(first.stdout, /\[1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project · SAVED/);
+  assert.match(first.stdout, /\[session 1\/1 · block 1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project \(-session\) · SUMMARIZING/);
+  assert.match(first.stdout, /\[session 1\/1 · block 1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project \(-session\) · SAVED/);
+  assert.match(first.stdout, /Checked: 1 work block across 1 session\./);
   assert.doesNotMatch(first.stdout, /large sessions may take a few minutes/);
   assert.match(first.stdout, /Saved: 1 summary created/);
   const daily = await readFile(dailyPath, "utf8");
@@ -401,16 +402,60 @@ test("real CLI backfill preserves handwritten notes, gives progress, and repeats
   assert.equal((await calls(w.callsPath)).length, 1);
 });
 
-test("CLI backfill progress lists skipped sessions and uses date-first one-word statuses", async (t) => {
+test("CLI backfill progress distinguishes skipped sessions from work blocks without redundant checking lines", async (t) => {
   const w = await workspace(t);
   await addSession(w.settings, { id: "outside-range", timestamp: Date.now() - 5 * 86400000 });
   await addSession(w.settings, { id: "in-range" });
 
   const result = await runCli(["backfill", "1", "--dry-run"], w.env);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /^\[1\/2\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project · SKIPPED$/m);
-  assert.match(result.stdout, /^\[2\/2\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project · CHECKING$/m);
-  assert.match(result.stdout, /^\[2\/2\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project · PREVIEW$/m);
+  assert.match(result.stdout, /^\[session 1\/2\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project \(de-range\) · SKIPPED: outside date range$/m);
+  assert.match(result.stdout, /^\[session 2\/2 · block 1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project \(in-range\) · PREVIEW$/m);
+  assert.doesNotMatch(result.stdout, /CHECKING/);
+  assert.match(result.stdout, /Checked: 1 work block across 1 session\./);
+});
+
+test("parallel CLI progress identifies same-time sessions and continuation blocks without duplicate processing", async (t) => {
+  const w = await workspace(t);
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86400_000).toISOString().slice(0, 10);
+  for (const id of ["session-11111111", "session-22222222"]) {
+    await addSession(w.settings, { id, timestamp: Date.parse(`${yesterday}T12:00:00Z`) });
+    const sessionPath = path.join(w.settings.sessionDirectory, `${id}.jsonl`);
+    const original = await readFile(sessionPath, "utf8");
+    await writeFile(sessionPath, `${original}\n${JSON.stringify({
+      type: "message", id: `${id}-resume`, timestamp: `${today}T12:00:00Z`,
+      message: { role: "user", content: "Continue the next work block." },
+    })}\n`);
+    // Discovery must not schedule a copied session file as another session.
+    await writeFile(path.join(w.settings.sessionDirectory, `${id}-copy.jsonl`), await readFile(sessionPath, "utf8"));
+  }
+  const first = await runCli(["backfill", "1"], w.env);
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(first.stdout, /Found 2 saved Pi sessions/);
+  assert.match(first.stdout, /not a completion counter/);
+  assert.match(first.stdout, /Checked: 4 work blocks across 2 sessions\./);
+  assert.equal((await calls(w.callsPath)).length, 4);
+  const lines = first.stdout.split("\n").filter((line) => line.startsWith("[session "));
+  assert.equal(lines.length, 8);
+  for (const [index, id] of [[1, "11111111"], [2, "22222222"]]) {
+    const sessionLines = lines.filter((line) => line.startsWith(`[session ${index}/2 `));
+    assert.equal(sessionLines.length, 4);
+    for (const block of [1, 2]) {
+      const blockLines = sessionLines.filter((line) => line.includes(`block ${block}/2]`));
+      assert.equal(blockLines.length, 2);
+      assert.ok(blockLines.every((line) => line.includes(`demo-project (${id})`)));
+      assert.match(blockLines[0], /SUMMARIZING/);
+      assert.match(blockLines[1], /SAVED/);
+      assert.equal(blockLines.every((line) => line.includes(" · prerequisite")), block === 1);
+    }
+  }
+  const repeated = await runCli(["backfill", "1"], w.env);
+  assert.equal(repeated.code, 0, repeated.stderr);
+  assert.equal((await calls(w.callsPath)).length, 4);
+  assert.doesNotMatch(repeated.stdout, /SUMMARIZING|CHECKING/);
+  assert.match(repeated.stdout, /Checked: 2 work blocks across 2 sessions\./);
+  assert.equal(repeated.stdout.split("\n").filter((line) => line.startsWith("[session ") && line.endsWith("CURRENT")).length, 2);
 });
 
 test("CLI backfill updates an evolving session row and keeps a hand-edited blurb", async (t) => {

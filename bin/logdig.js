@@ -190,13 +190,18 @@ async function backfill(args) {
     return;
   }
 
+  console.log("Progress labels identify sessions and their work blocks, not a completion counter.");
+  console.log("Each block reports status changes; parallel sessions may finish out of order.\n");
   const modelClient = createPiModelClient(generationSettings);
   const result = await writeSessions(modelClient, found.sessions, settings, {
     ...found,
     dryRun,
-    onProgress: ({ index, total, sessionId, project, date, time, status, sessionPath, dailyPath, prerequisite }) => {
-      const label = `${date ? `${date}${time ? ` ${time}` : ""} · ` : ""}${project || sessionId}`;
-      console.log(`[${index}/${total}] ${label} · ${progressStatus(status || "CHECKING")}`);
+    onProgress: ({ index, total, sessionId, blockIndex, blockTotal, project, date, time, status, error, reason, sessionPath, dailyPath, prerequisite }) => {
+      if (status === "CHECKING") return;
+      const position = `session ${index}/${total}${blockIndex ? ` · block ${blockIndex}/${blockTotal}` : ""}`;
+      const label = `${date ? `${date}${time ? ` ${time}` : ""} · ` : ""}${project || "session"} (${sessionId.slice(-8)})`;
+      const detail = error || reason;
+      console.log(`[${position}] ${label} · ${progressStatus(status)}${prerequisite ? " · prerequisite" : ""}${detail ? `: ${detail}` : ""}`);
       if (dryRun && dailyPath) {
         console.log(`  Daily note: ${dailyPath}`);
         console.log(`  Full summary: ${sessionPath}`);
@@ -207,9 +212,12 @@ async function backfill(args) {
   const summaryCount = `${result.summariesCreated} ${result.summariesCreated === 1 ? "summary" : "summaries"}`;
   const entryCount = `${result.entriesAppended} daily ${result.entriesAppended === 1 ? "entry" : "entries"}`;
   const updateCount = `${result.entriesUpdated} ${result.entriesUpdated === 1 ? "entry" : "entries"}`;
+  const checkedBlocks = result.sessionResults.filter((entry) => entry.blockId);
+  const checkedSessions = new Set(checkedBlocks.map((entry) => entry.sessionId)).size;
+  console.log(`\nChecked: ${checkedBlocks.length} work block${checkedBlocks.length === 1 ? "" : "s"} across ${checkedSessions} session${checkedSessions === 1 ? "" : "s"}.`);
   console.log(dryRun
-    ? `\nWould create ${summaryCount}, reuse ${result.summariesReused}, append ${entryCount}; ${result.entriesSkipped} already present; update ${updateCount}.`
-    : `\nSaved: ${summaryCount} created, ${result.summariesReused} reused, appended ${entryCount}; ${result.entriesSkipped} already present; updated ${updateCount}.`);
+    ? `Would create ${summaryCount}, reuse ${result.summariesReused}, append ${entryCount}; ${result.entriesSkipped} already present; update ${updateCount}.`
+    : `Saved: ${summaryCount} created, ${result.summariesReused} reused, appended ${entryCount}; ${result.entriesSkipped} already present; updated ${updateCount}.`);
   if (result.sessionsSkipped) console.log(`${result.sessionsSkipped} session${result.sessionsSkipped === 1 ? "" : "s"} skipped (outside the date range or without journalable messages).`);
   if (result.dates.length) {
     console.log(`Daily-note dates: ${result.dates.join(", ")}`);

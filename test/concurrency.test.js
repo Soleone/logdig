@@ -62,8 +62,11 @@ for (const [concurrency, expected] of [[undefined, 4], [1, 1], [2, 2], [20, 7]])
     let active = 0;
     let peak = 0;
     let calls = 0;
+    const callsBySession = new Map();
     const completed = [];
-    const model = { complete: async () => {
+    const model = { complete: async (prompt) => {
+      const id = prompt.match(/Record (session-\d+)/)[1];
+      callsBySession.set(id, (callsBySession.get(id) || 0) + 1);
       const call = ++calls;
       peak = Math.max(peak, ++active);
       if (calls === expected) started.resolve();
@@ -87,6 +90,7 @@ for (const [concurrency, expected] of [[undefined, 4], [1, 1], [2, 2], [20, 7]])
     const result = await pending;
     assert.equal(peak, expected);
     assert.equal(calls, sessions.length);
+    assert.deepEqual([...callsBySession.entries()].sort(), sessions.map((item) => [item.header.id, 1]));
     assert.deepEqual(result.errors, []);
     assert.equal(result.summariesCreated, sessions.length);
     assert.equal(result.entriesAppended, sessions.length);
@@ -116,11 +120,21 @@ test("parallel sessions retain sequential work blocks and real continuation snap
   const sessions = [session("first"), session("second")];
   for (const item of sessions) item.entries.push(...session(item.header.id, "2026-10-02").entries);
   let calls = 0;
-  const result = await writeSessions({ complete: async () => { calls++; return layers; } }, sessions, settings);
+  const progress = [];
+  const result = await writeSessions({ complete: async () => { calls++; return layers; } }, sessions, settings, {
+    onProgress: (event) => progress.push(event),
+  });
   assert.deepEqual(result.errors, []);
   assert.equal(calls, 4);
   assert.equal(result.entriesAppended, 4);
   for (const id of ["first", "second"]) {
+    const events = progress.filter((event) => event.sessionId === id);
+    assert.deepEqual(events.map((event) => [event.blockIndex, event.blockTotal, event.status]), [
+      [1, 2, "CHECKING"], [1, 2, "SUMMARIZING"], [1, 2, "SAVED"],
+      [2, 2, "CHECKING"], [2, 2, "SUMMARIZING"], [2, 2, "SAVED"],
+    ]);
+    assert.equal(new Set(events.map((event) => event.index)).size, 1);
+    assert.equal(new Set(events.map((event) => event.blockId)).size, 2);
     const [earlier, later] = result.sessionResults.filter((entry) => entry.sessionId === id);
     assert.equal(earlier.continuationOf, undefined);
     const snapshot = parseSessionNote(await readFile(path.join(settings.cacheDirectory, "Entries", `${later.continuationOf}.md`), "utf8"));

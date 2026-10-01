@@ -168,6 +168,7 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
         ...(latestBlock && { project: latestBlock.project, date: latestBlock.date, time: latestBlock.time }),
         phase: "skipped",
         status: "SKIPPED",
+        reason,
       });
       return;
     }
@@ -175,14 +176,17 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
     const plannedSnapshots = new Map();
     for (const [blockIndex, block] of blocks.entries()) {
       if (!selected.has(blockIndex)) continue;
-      const blockProgress = { ...progress, blockId: block.blockId, project: block.project, date: block.date, time: block.time };
+      const blockProgress = {
+        ...progress, blockId: block.blockId, blockIndex: blockIndex + 1, blockTotal: blocks.length,
+        project: block.project, date: block.date, time: block.time, prerequisite: !blockInRange(block, range),
+      };
       try {
         const previous = blocks[blockIndex - 1];
         const continuationOf = previous
           ? plannedSnapshots.get(previous.blockId) || await precedingSnapshot(modelClient, previous, versions, settings)
           : undefined;
         const journalBlock = { ...block, continuationOf };
-        const prerequisite = !blockInRange(block, range);
+        const { prerequisite } = blockProgress;
         range.onProgress?.({ ...blockProgress, phase: "checking", status: "CHECKING" });
         const cached = range.dryRun
           ? await inspectSessionSummary(modelClient, settings.cacheDirectory, journalBlock)
