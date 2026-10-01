@@ -41,6 +41,17 @@ logdig backfill 1 --dry-run
 logdig backfill 7 --dry-run
 ```
 
+To backfill older work without spending model requests on ongoing sessions, add `--skip-today`:
+
+```sh
+logdig backfill 7 --skip-today --dry-run
+logdig backfill 7 --skip-today
+logdig backfill 14 --skip-today
+logdig backfill 30 --skip-today
+```
+
+This selects complete calendar days through yesterday in your timezone and excludes whole work periods that continued today. Earlier periods in the same session can still be logged. Each wider run reuses unchanged summaries. The flag also works with `backfill all` and `status`.
+
 If no history is found at all, start a saved Pi session or select the right history folder in the wizard's advanced settings.
 
 ## 3. Make the first entry

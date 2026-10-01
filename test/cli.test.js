@@ -356,6 +356,82 @@ test("CLI status and preview expose missing continuation prerequisites without g
   await assert.rejects(readdir(w.settings.dailyDirectory), { code: "ENOENT" });
 });
 
+test("skip-today previews and incrementally backfills past work without summarizing ongoing sessions", async (t) => {
+  const w = await workspace(t);
+  const today = new Date().toISOString().slice(0, 10);
+  const day = (offset) => new Date(Date.parse(`${today}T00:00:00Z`) + offset * 86400_000).toISOString().slice(0, 10);
+  for (const [id, offset] of [["oldest", -7], ["outside", -8], ["yesterday", -1], ["multi", -2]]) {
+    await addSession(w.settings, { id, timestamp: Date.parse(`${day(offset)}T12:00:00Z`) });
+  }
+  await addSession(w.settings, { id: "active-today" });
+  await addSession(w.settings, { id: "overnight", timestamp: Date.parse(`${day(-1)}T23:00:00Z`) });
+  for (const [id, role, time] of [["overnight", "assistant", "00:01"], ["multi", "user", "12:00"]]) {
+    const sessionPath = path.join(w.settings.sessionDirectory, `${id}.jsonl`);
+    await writeFile(sessionPath, `${await readFile(sessionPath, "utf8")}\n${JSON.stringify({
+      type: "message", id: `${id}-today`, timestamp: `${today}T${time}:00Z`, message: { role, content: "Still working today.", stopReason: "stop" },
+    })}\n`);
+  }
+  const status = await runCli(["status", "--skip-today", "7", "--json"], w.env);
+  assert.equal(status.code, 0, status.stderr);
+  const report = JSON.parse(status.stdout);
+  assert.deepEqual(report.timeframe, { kind: "days", days: 7, firstDate: day(-7), lastDate: day(-1), timeZone: "UTC", skipToday: true });
+  assert.deepEqual(report.sessions.map((block) => block.sessionId).sort(), ["multi", "oldest", "yesterday"]);
+  assert.equal(report.totals.excludedToday, 3);
+  const preview = await runCli(["backfill", "7", "--skip-today", "--dry-run"], w.env);
+  assert.equal(preview.code, 0, preview.stderr);
+  assert.match(preview.stdout, /last 7 complete days.*skipping today/);
+  assert.ok(preview.stdout.includes(`${day(-7)} through ${day(-1)}`));
+  assert.match(preview.stdout, /3 work periods excluded because of activity today/);
+  assert.match(preview.stdout, /Would create 3 summaries/);
+  assert.match(preview.stdout, /When you're ready: .*backfill 7 --skip-today/);
+  const all = JSON.parse((await runCli(["status", "all", "--json", "--skip-today"], w.env)).stdout);
+  assert.equal(all.timeframe.firstDate, null);
+  assert.equal(all.timeframe.lastDate, day(-1));
+  assert.equal(all.totals.eligible, 4);
+  const yesterday = JSON.parse((await runCli(["status", "1", "--skip-today", "--json"], w.env)).stdout);
+  assert.equal(yesterday.timeframe.firstDate, day(-1));
+  assert.deepEqual(yesterday.sessions.map((block) => block.sessionId), ["yesterday"]);
+  const text = await runCli(["status", "7", "--skip-today"], w.env);
+  assert.match(text.stdout, /3 work periods excluded because of activity today/);
+  assert.match(text.stdout, /To update the journal: .*backfill 7 --skip-today/);
+  assert.deepEqual(await calls(w.callsPath), []);
+  await assert.rejects(readdir(w.settings.cacheDirectory), { code: "ENOENT" });
+  await assert.rejects(readdir(w.settings.dailyDirectory), { code: "ENOENT" });
+  const saved = await runCli(["backfill", "7", "--skip-today"], w.env);
+  assert.equal(saved.code, 0, saved.stderr);
+  assert.equal((await calls(w.callsPath)).length, 3);
+  const wider = await runCli(["backfill", "14", "--skip-today"], w.env);
+  assert.equal(wider.code, 0, wider.stderr);
+  assert.match(wider.stdout, /1 summary created, 3 reused/);
+  assert.equal((await calls(w.callsPath)).length, 4);
+  assert.deepEqual((await readdir(path.join(w.settings.cacheDirectory, "Sessions"))).sort(), ["multi.md", "oldest.md", "outside.md", "yesterday.md"]);
+  await assert.rejects(readFile(path.join(w.settings.dailyDirectory, `${today}.md`)), { code: "ENOENT" });
+  const normal = JSON.parse((await runCli(["status", "7", "--json"], w.env)).stdout);
+  assert.equal(normal.timeframe.lastDate, today);
+  assert.equal(normal.timeframe.skipToday, undefined);
+  assert.ok(normal.sessions.some((block) => block.sessionId === "active-today"));
+  assert.ok(normal.sessions.some((block) => block.sessionId === "overnight"));
+});
+
+test("skip-today with only current activity makes no model requests or files and preserves the flag in hints", async (t) => {
+  const w = await workspace(t);
+  await addSession(w.settings);
+  const result = await runCli(["backfill", "--skip-today"], w.env);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /last 3 complete days/);
+  assert.match(result.stdout, /SKIPPED.*active today/);
+  assert.match(result.stdout, /1 work period excluded because of activity today/);
+  assert.match(result.stdout, /backfill all --skip-today --dry-run/);
+  assert.deepEqual(await calls(w.callsPath), []);
+  await assert.rejects(readdir(w.settings.cacheDirectory), { code: "ENOENT" });
+  await assert.rejects(readdir(w.settings.dailyDirectory), { code: "ENOENT" });
+  for (const command of ["backfill", "status"]) {
+    const invalid = await runCli([command, "--skip-today=true"], w.env);
+    assert.equal(invalid.code, 1);
+    assert.match(invalid.stderr, /Unknown .* argument/);
+  }
+});
+
 test("status reports malformed history as incomplete JSON and validates its arguments", async (t) => {
   const w = await workspace(t);
   await writeFile(path.join(w.settings.sessionDirectory, "broken.jsonl"), "not json");

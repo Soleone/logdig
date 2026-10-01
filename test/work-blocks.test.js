@@ -80,6 +80,18 @@ test("assistant completion after midnight never starts a block without a new use
   assert.equal(blockInRange(result[0], { firstDate: "2026-10-02", lastDate: "2026-10-02" }), false);
 });
 
+test("skip-today excludes overnight activity, including filtered tool results, but not bookkeeping", () => {
+  const range = { firstDate: "2026-09-24", lastDate: "2026-09-30", skipToday: true };
+  for (const role of ["user", "assistant", "toolResult", "bashExecution"]) {
+    const [block] = blocks([message("start", "2026-09-30T22:00:00Z"), message("overnight", "2026-10-01T00:01:00Z", role, "")]);
+    assert.equal(blockInRange(block, range), false, role);
+    assert.equal(blockInRange(block, { ...range, firstDate: undefined }), false, `all: ${role}`);
+    assert.equal(blockInRange(block, { ...range, skipToday: false }), true, `normal: ${role}`);
+  }
+  const [past] = blocks([message("start", "2026-09-30T22:00:00Z"), { type: "session_info", timestamp: "2026-10-01T00:01:00Z", name: "Renamed" }]);
+  assert.equal(blockInRange(past, range), true);
+});
+
 test("the inactivity clock uses elapsed time across DST, not wall-clock subtraction", () => {
   const result = blocks([
     message("start", "2026-10-31T23:30:00-04:00"),

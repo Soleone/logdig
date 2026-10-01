@@ -67,13 +67,15 @@ async function findSessionFiles(root) {
   return { files, warnings };
 }
 
-export async function collectSessions({ sessionDirectory, timeZone, days, currentSession }) {
+export async function collectSessions({ sessionDirectory, timeZone, days, currentSession, skipToday = false }) {
   const { files, warnings } = await findSessionFiles(sessionDirectory);
   const currentId = currentSession?.header.id;
   const currentPath = currentSession?.sourcePath;
-  const today = localDate(Date.now(), timeZone);
-  const firstDate = days ? shiftDate(today, 1 - days) : undefined;
-  const modifiedAfter = days ? Date.now() - (days + 1) * 86400000 : undefined;
+  const now = Date.now();
+  const today = localDate(now, timeZone);
+  const lastDate = skipToday ? shiftDate(today, -1) : today;
+  const firstDate = days ? shiftDate(lastDate, 1 - days) : undefined;
+  const modifiedAfter = days ? now - (days + 1 + Number(skipToday)) * 86400000 : undefined;
   const sessions = [];
   const seen = new Set();
 
@@ -94,7 +96,7 @@ export async function collectSessions({ sessionDirectory, timeZone, days, curren
 
   if (currentSession && !seen.has(currentSession.header.id)) sessions.push(currentSession);
   sessions.sort((left, right) => sessionEndTime(left) - sessionEndTime(right) || left.header.id.localeCompare(right.header.id));
-  return { sessions, warnings, firstDate, lastDate: today };
+  return { sessions, warnings, firstDate, lastDate, ...(skipToday ? { skipToday: true } : {}) };
 }
 
 function selectedBlockIndexes(blocks, versions, range) {
@@ -129,6 +131,7 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
   let entriesUpdated = 0;
   let entriesSkipped = 0;
   let sessionsSkipped = 0;
+  let blocksExcludedToday = 0;
   const dates = new Set();
   const dailyPaths = new Set();
   const results = sessions.map(() => ({ errors: [], sessionResults: [] }));
@@ -157,10 +160,12 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
     const versions = journaledEntries.get(session.header.id) || [];
     journaledEntries.set(session.header.id, versions);
     assignLegacyBlocks(versions, blocks);
+    const excludedToday = range.skipToday ? blocks.filter((block) => block.activityDates.some((date) => date > range.lastDate)).length : 0;
+    blocksExcludedToday += excludedToday;
     const selected = selectedBlockIndexes(blocks, versions, range);
     if (!selected.size) {
       sessionsSkipped++;
-      const reason = blocks.length ? "outside date range" : "no journalable events";
+      const reason = excludedToday ? "work periods active today (--skip-today)" : blocks.length ? "outside date range" : "no journalable events";
       const latestBlock = blocks.at(-1);
       sessionResults.push({ sessionId: session.header.id, status: "skipped", reason });
       range.onProgress?.({
@@ -270,7 +275,7 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
   }));
 
   return {
-    summariesCreated, summariesReused, entriesAppended, entriesUpdated, entriesSkipped, sessionsSkipped,
+    summariesCreated, summariesReused, entriesAppended, entriesUpdated, entriesSkipped, sessionsSkipped, blocksExcludedToday,
     dates: [...dates].sort(), dailyPaths: [...dailyPaths].sort(),
     errors: results.flatMap((result) => result.errors),
     sessionResults: results.flatMap((result) => result.sessionResults),

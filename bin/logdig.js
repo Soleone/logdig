@@ -141,12 +141,15 @@ async function backfill(args) {
   const settings = await loadSettings();
   let daysArgument;
   let dryRun = false;
+  let skipToday = false;
   let selectedModel = settings.model;
   let selectedThinking = settings.thinkingLevel;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--dry-run") {
       dryRun = true;
+    } else if (arg === "--skip-today") {
+      skipToday = true;
     } else if (arg === "--model" || arg === "-m") {
       selectedModel = args[++index];
       if (!selectedModel || selectedModel.startsWith("-")) throw new Error("--model requires provider/model, or 'default' to use Pi's startup model");
@@ -170,7 +173,7 @@ async function backfill(args) {
   const range = parseBackfillArgument(daysArgument);
   requireJournalPaths(settings);
 
-  console.log(`${dryRun ? "Preview" : "Backfill"}: ${range.all ? "all saved sessions" : `last ${range.days} day${range.days === 1 ? "" : "s"}`} (${settings.timeZone})`);
+  console.log(`${dryRun ? "Preview" : "Backfill"}: ${range.all ? "all saved sessions" : `last ${range.days}${skipToday ? " complete" : ""} day${range.days === 1 ? "" : "s"}`} (${settings.timeZone})${skipToday ? " · skipping today" : ""}`);
   console.log(`Daily notes: ${settings.dailyDirectory} (${settings.dailyHeader}, ${settings.dailySummary})`);
   console.log(`Summary cache: ${path.join(settings.cacheDirectory, "Sessions")}`);
   console.log(`Model: ${selectedModel || "Pi startup default"}`);
@@ -179,8 +182,8 @@ async function backfill(args) {
   console.log(dryRun
     ? "Dry run: no model requests, no file changes, and no folders created."
     : "Only new or changed work blocks need summarizing. Selected, redacted history is sent to Pi's model; provider charges may apply.");
-  const found = await collectSessions({ sessionDirectory: settings.sessionDirectory, timeZone: settings.timeZone, days: range.days });
-  console.log(`\nFound ${found.sessions.length} saved Pi session${found.sessions.length === 1 ? "" : "s"}${found.firstDate ? ` to check for ${found.firstDate} through ${found.lastDate}` : ""}.`);
+  const found = await collectSessions({ sessionDirectory: settings.sessionDirectory, timeZone: settings.timeZone, days: range.days, skipToday });
+  console.log(`\nFound ${found.sessions.length} saved Pi session${found.sessions.length === 1 ? "" : "s"}${found.firstDate ? ` to check for ${found.firstDate} through ${found.lastDate}` : skipToday ? ` to check through ${found.lastDate}` : ""}.`);
   if (found.sessions.length === 0) {
     console.log(`No saved sessions found. History folder: ${settings.sessionDirectory}`);
     console.log(`If you have saved history elsewhere, choose it in '${commandName} init' (advanced settings). Otherwise, start a Pi session first.`);
@@ -222,13 +225,14 @@ async function backfill(args) {
   console.log(dryRun
     ? `Would create ${summaryCount}, reuse ${result.summariesReused}, append ${entryCount}; ${result.entriesSkipped} already present; update ${updateCount}.`
     : `Saved: ${summaryCount} created, ${result.summariesReused} reused, appended ${entryCount}; ${result.entriesSkipped} already present; updated ${updateCount}.`);
-  if (result.sessionsSkipped) console.log(`${result.sessionsSkipped} session${result.sessionsSkipped === 1 ? "" : "s"} skipped (outside the date range or without journalable messages).`);
+  if (result.sessionsSkipped) console.log(`${result.sessionsSkipped} session${result.sessionsSkipped === 1 ? "" : "s"} skipped (outside the date range or without journalable messages${skipToday ? ", or active today" : ""}).`);
+  if (skipToday) console.log(`${result.blocksExcludedToday} work period${result.blocksExcludedToday === 1 ? "" : "s"} excluded because of activity today (--skip-today).`);
   if (result.dates.length) {
     console.log(`Daily-note dates: ${result.dates.join(", ")}`);
     if (dryRun && result.summariesCreated) console.log(`${result.summariesCreated} work block${result.summariesCreated === 1 ? "" : "s"} would need summarizing. Large blocks may require multiple model requests each.`);
     if (!result.summariesCreated && !result.errors.length) console.log("These unchanged work blocks need no model requests.");
   } else if (!result.errors.length) {
-    console.log(`Nothing to journal in this range. Try '${commandName} backfill 7 --dry-run' or '${commandName} backfill all --dry-run'.`);
+    console.log(`Nothing to journal in this range. Try '${commandName} backfill 7${skipToday ? " --skip-today" : ""} --dry-run' or '${commandName} backfill all${skipToday ? " --skip-today" : ""} --dry-run'.`);
   }
   const warnings = [...found.warnings, ...result.errors];
   if (warnings.length) {
@@ -236,35 +240,39 @@ async function backfill(args) {
     console.warn(dryRun ? "Preview incomplete. Fix the issues above, then preview again." : "Some sessions could not be saved. Successful summaries are cached. Fix the issues above and rerun the same command to retry.");
     process.exitCode = 1;
   } else if (dryRun && result.dates.length) {
-    console.log(`\nWhen you're ready: ${commandName} backfill ${range.all ? "all" : range.days}${selectedModel ? ` --model ${selectedModel}` : settings.model ? " --model default" : ""}${selectedThinking ? ` --thinking ${selectedThinking}` : settings.thinkingLevel ? " --thinking default" : ""}`);
+    console.log(`\nWhen you're ready: ${commandName} backfill ${range.all ? "all" : range.days}${skipToday ? " --skip-today" : ""}${selectedModel ? ` --model ${selectedModel}` : settings.model ? " --model default" : ""}${selectedThinking ? ` --thinking ${selectedThinking}` : settings.thinkingLevel ? " --thinking default" : ""}`);
   }
 }
 
 function parseStatusArguments(args) {
   let rangeArgument;
   let json = false;
+  let skipToday = false;
   for (const arg of args) {
     if (arg === "--json") {
       json = true;
+    } else if (arg === "--skip-today") {
+      skipToday = true;
     } else if (arg.startsWith("-")) {
       throw new Error(`Unknown status argument: ${arg}. Run '${commandName} status --help'.`);
     } else if (rangeArgument !== undefined) {
-      throw new Error(`Usage: ${commandName} status [number-of-days|all] [--json]`);
+      throw new Error(`Usage: ${commandName} status [number-of-days|all] [--json] [--skip-today]`);
     } else {
       rangeArgument = arg;
     }
   }
-  return { range: parseBackfillArgument(rangeArgument, "status"), json };
+  return { range: parseBackfillArgument(rangeArgument, "status"), json, skipToday };
 }
 
 async function status(args) {
-  const { range, json } = parseStatusArguments(args);
+  const { range, json, skipToday } = parseStatusArguments(args);
   const settings = await loadSettings();
   requireJournalPaths(settings);
   const found = await collectSessions({
     sessionDirectory: settings.sessionDirectory,
     timeZone: settings.timeZone,
     days: range.days,
+    skipToday,
   });
   const previousEntries = await listJournaledSessions(settings.cacheDirectory);
   const inspection = await writeSessions(
@@ -309,6 +317,7 @@ async function status(args) {
       firstDate: found.firstDate || null,
       lastDate: found.lastDate,
       timeZone: settings.timeZone,
+      ...(skipToday ? { skipToday: true } : {}),
     },
     totals: {
       scanned: found.sessions.length,
@@ -319,6 +328,7 @@ async function status(args) {
       needsSummarizing,
       skipped: inspection.sessionsSkipped,
       errors: inspection.errors.length,
+      ...(skipToday ? { excludedToday: inspection.blocksExcludedToday } : {}),
     },
     sessions,
     warnings,
@@ -327,8 +337,9 @@ async function status(args) {
   if (json) {
     console.log(JSON.stringify(report, null, 2));
   } else {
-    const label = range.all ? "all saved sessions" : `last ${range.days} calendar day${range.days === 1 ? "" : "s"}`;
-    console.log(`LogDig status: activity in ${label} (${settings.timeZone})${found.firstDate ? ` · ${found.firstDate} through ${found.lastDate}` : ""}`);
+    const label = range.all ? "all saved sessions" : `last ${range.days}${skipToday ? " complete" : ""} calendar day${range.days === 1 ? "" : "s"}`;
+    console.log(`LogDig status: activity in ${label} (${settings.timeZone})${found.firstDate ? ` · ${found.firstDate} through ${found.lastDate}` : skipToday ? ` · through ${found.lastDate}` : ""}${skipToday ? " · skipping today" : ""}`);
+    if (skipToday) console.log(`${inspection.blocksExcludedToday} work period${inspection.blocksExcludedToday === 1 ? "" : "s"} excluded because of activity today (--skip-today).`);
     console.log(`${report.totals.eligible} work block${report.totals.eligible === 1 ? "" : "s"}: ${report.totals.logged} logged, ${stale} stale, ${newCount} new.`);
     console.log(`Summaries: ${report.totals.eligible - needsSummarizing} reusable, ${needsSummarizing} work block${needsSummarizing === 1 ? " needs" : "s need"} summarizing.`);
     const prerequisites = sessions.filter((session) => session.prerequisite).length;
@@ -348,7 +359,7 @@ async function status(args) {
       console.log("Everything in this timeframe is current.");
     }
     if (newCount || stale || needsSummarizing) {
-      console.log(`\nTo update the journal: ${commandName} backfill ${range.all ? "all" : range.days}`);
+      console.log(`\nTo update the journal: ${commandName} backfill ${range.all ? "all" : range.days}${skipToday ? " --skip-today" : ""}`);
     }
   }
 
@@ -371,15 +382,19 @@ function helpText() {
     "  logdig init                         guided setup; nothing is summarized",
     "  logdig doctor                       check paths and Pi without a model request",
     "  logdig config                       show settings and active environment overrides",
-    "  logdig backfill [N|all] [--dry-run] [--model provider/model|default]",
+    "  logdig backfill [N|all] [--dry-run] [--skip-today]",
+    "                                      [--model provider/model|default]",
     "                                      [--thinking default|off|minimal|low|medium|high|xhigh|max]",
     "                                      journal saved sessions (default: last 3 days)",
-    "  logdig status [N|all] [--json]       show journal coverage (default: last 3 days; read-only)",
+    "  logdig status [N|all] [--json] [--skip-today]",
+    "                                      show journal coverage (default: last 3 days; read-only)",
     "  logdig pi-install | pi-uninstall     add or remove /journal integration",
     "  logdig --version                    show the installed version",
     "",
     "Preview first: --dry-run shows dates, files, and cache hits. It never calls Pi",
     "or writes files. Remove --dry-run when you're ready to summarize.",
+    "--skip-today selects N complete calendar days ending yesterday, or all past work.",
+    "Work periods with activity today are excluded entirely, including overnight work.",
     "",
     "Real backfill uses Pi's startup model and existing authentication. Tools,",
     "extensions, project context, and session saving are disabled for model requests.",

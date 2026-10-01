@@ -73,6 +73,61 @@ test("today's backfill updates overnight work on yesterday's note", async (t) =>
   await assert.rejects(readFile(f.dailyPath("2026-10-01")), { code: "ENOENT" });
 });
 
+test("skip-today excludes an entire overnight block without generating, inspecting cache freshness, or writing", async (t) => {
+  const f = await fixture(t);
+  const range = { firstDate: "2026-09-24", lastDate: "2026-09-30", skipToday: true };
+  for (const dryRun of [true, false]) {
+    const result = await writeSessions(f.model, [f.session], f.settings, { ...range, dryRun });
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.blocksExcludedToday, 1);
+    assert.equal(result.sessionsSkipped, 1);
+    assert.equal(result.summariesCreated, 0);
+    assert.equal(f.prompts.length, 0);
+    assert.match(result.sessionResults[0].reason, /active today/);
+    assert.deepEqual(await readdir(f.root), []);
+  }
+});
+
+test("skip-today preserves earlier blocks and missing continuation links while ongoing work grows", async (t) => {
+  const f = await fixture(t);
+  f.session.entries = [message("old", "2026-09-29T12:00:00Z"), message("yesterday", "2026-09-30T12:00:00Z"), message("today", "2026-10-01T12:00:00Z")];
+  const range = { firstDate: "2026-09-30", lastDate: "2026-09-30", skipToday: true };
+  const preview = await writeSessions(f.model, [f.session], f.settings, { ...range, dryRun: true });
+  assert.equal(preview.blocksExcludedToday, 1);
+  assert.deepEqual(preview.sessionResults.map((block) => [block.date, block.prerequisite]), [["2026-09-29", true], ["2026-09-30", false]]);
+  assert.deepEqual(await readdir(f.root), []);
+  const saved = await writeSessions(f.model, [f.session], f.settings, range);
+  assert.deepEqual(saved.errors, []);
+  assert.equal(f.prompts.length, 2);
+  assert.equal(saved.blocksExcludedToday, 1);
+  assert.ok(f.prompts.every((prompt) => !prompt.includes('"text":"today"')));
+  const snapshot = parseSessionNote(await readFile(path.join(f.settings.cacheDirectory, "Entries", `${saved.sessionResults[1].continuationOf}.md`), "utf8"));
+  assert.equal(snapshot.blockId, saved.sessionResults[0].blockId);
+  const before = await readFile(f.dailyPath("2026-09-30"), "utf8");
+  f.session.entries.push(message("ongoing", "2026-10-01T12:01:00Z"));
+  const widened = await writeSessions(f.model, [f.session], f.settings, { ...range, firstDate: "2026-09-17" });
+  assert.deepEqual(widened.errors, []);
+  assert.equal(widened.summariesReused, 2);
+  assert.equal(f.prompts.length, 2);
+  assert.equal(await readFile(f.dailyPath("2026-09-30"), "utf8"), before);
+  await assert.rejects(readFile(f.dailyPath("2026-10-01")), { code: "ENOENT" });
+  assert.equal((await readdir(path.join(f.settings.cacheDirectory, "Sessions"))).length, 2);
+});
+
+test("skip-today leaves an existing overnight summary and daily note untouched", async (t) => {
+  const f = await fixture(t);
+  await writeSessions(f.model, [f.session], f.settings);
+  const daily = await readFile(f.dailyPath("2026-09-30"), "utf8");
+  const cachePath = path.join(f.settings.cacheDirectory, "Sessions", "multi-day.md");
+  const cache = await readFile(cachePath, "utf8");
+  f.session.entries.push(message("ongoing", "2026-10-01T02:01:00Z", "assistant"));
+  const result = await writeSessions(f.model, [f.session], f.settings, { lastDate: "2026-09-30", skipToday: true });
+  assert.equal(result.blocksExcludedToday, 1);
+  assert.equal(f.prompts.length, 1);
+  assert.equal(await readFile(cachePath, "utf8"), cache);
+  assert.equal(await readFile(f.dailyPath("2026-09-30"), "utf8"), daily);
+});
+
 test("later work does not invalidate closed earlier blocks outside the requested activity range", async (t) => {
   const f = await fixture(t);
   f.session.entries = [message("start", "2026-09-30T22:00:00Z"), message("done", "2026-09-30T23:00:00Z", "assistant")];

@@ -104,6 +104,22 @@ The block's **starting date and time** supply its journal timestamp. Continuous 
 
 Date ranges select actual conversation activity, not just assigned journal dates. Today's backfill therefore catches assistant completion or continued work after midnight and updates yesterday's entry. If a selected continuation has no preceding snapshot, LogDig includes the missing earlier block(s) as prerequisites. Status and preview explicitly show these additions, including their summary-generation cost implications.
 
+### Backfill past work without touching today
+
+Use `--skip-today` with CLI `backfill` or `status` to select the last N **complete calendar days**, ending yesterday in your configured timezone. For example, `backfill 1 --skip-today` selects yesterday, and `backfill 7 --skip-today` selects seven days through yesterday. `all --skip-today` selects all past work.
+
+Work periods with conversation activity today are excluded entirely, even if they started before midnight. Earlier periods in the same session remain eligible. This avoids generating partial summaries or updating an ongoing period's existing cache or journal entry. Metadata-only activity does not exclude a period. Missing earlier continuation snapshots are still included as prerequisites.
+
+```sh
+logdig backfill 7 --skip-today --dry-run
+logdig backfill 7 --skip-today
+logdig backfill 14 --skip-today
+logdig backfill 30 --skip-today
+logdig backfill all --skip-today
+```
+
+Widening the range reuses unchanged summaries and fills the additional history. Status and preview show the selected dates and the number of excluded work periods; status JSON includes `timeframe.skipToday` and `totals.excludedToday` when the flag is set. Without the flag, the normal range still includes today.
+
 ### Summary reuse and existing journals
 
 Summary freshness is based on the selected, redacted evidence and bounded earlier context, plus summary-processing version, timezone, and configured generation policy. Earlier context is drawn from the preceding block's evidence, not its generated summary, and is marked as background rather than work to repeat. Metadata-only changes do not trigger model requests; usage totals can refresh separately. Explicit LogDig model or thinking-level changes invalidate summaries, while changes to Pi's defaults do not force regeneration under the default policy.
@@ -129,11 +145,13 @@ logdig backfill                     journal the last 3 calendar days
 logdig backfill 7 --dry-run          preview seven days without changing anything
 logdig backfill all --dry-run        preview every discoverable saved session
 logdig backfill 7                    journal seven days
+logdig backfill 7 --skip-today       journal seven complete days through yesterday
 logdig backfill 7 --model provider/model --thinking max
 logdig backfill 7 --model default    ignore a saved model override for this run
 logdig backfill 7 --thinking default ignore a saved thinking override for this run
 logdig status                       show coverage for the last 3 calendar days
 logdig status 7                     show coverage for seven days
+logdig status 7 --skip-today        show coverage excluding work active today
 logdig status all --json            output coverage for every saved session as JSON
 logdig pi-install                   install the /journal extension
 logdig pi-uninstall                 remove it without deleting notes or summaries

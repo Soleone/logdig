@@ -49,6 +49,29 @@ test("subagent artifact transcripts are ignored while nested saved sessions are 
   assert.deepEqual(result.warnings, []);
 });
 
+for (const [now, timeZone, firstDate, lastDate] of [
+  ["2026-10-01T02:00:00Z", "America/Toronto", "2026-09-23", "2026-09-29"],
+  ["2026-10-01T02:00:00Z", "UTC", "2026-09-24", "2026-09-30"],
+  ["2026-03-09T04:30:00Z", "America/Toronto", "2026-03-02", "2026-03-08"],
+  ["2026-11-02T04:30:00Z", "America/Toronto", "2026-10-25", "2026-10-31"],
+]) {
+  test(`skip-today uses complete local calendar days (${now}, ${timeZone})`, async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "logdig-skip-today-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    t.mock.timers.enable({ apis: ["Date"], now: Date.parse(now) });
+    const range = await collectSessions({ sessionDirectory: root, timeZone, days: 7, skipToday: true });
+    assert.equal(range.firstDate, firstDate);
+    assert.equal(range.lastDate, lastDate);
+    assert.equal(range.skipToday, true);
+    const all = await collectSessions({ sessionDirectory: root, timeZone, skipToday: true });
+    assert.equal(all.firstDate, undefined);
+    assert.equal(all.lastDate, lastDate);
+    const normal = await collectSessions({ sessionDirectory: root, timeZone, days: 7 });
+    assert.notEqual(normal.lastDate, lastDate);
+    assert.equal(normal.skipToday, undefined);
+  });
+}
+
 test("backfill range accepts day counts and all", () => {
   assert.deepEqual(parseBackfillArgument("7"), { days: 7 });
   assert.deepEqual(parseBackfillArgument("all"), { all: true });

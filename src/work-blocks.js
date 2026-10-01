@@ -79,6 +79,8 @@ export function workBlocksForSession(session, timeZone) {
 }
 
 export function blockInRange(block, range) {
+  // Never create a partial summary of a work period that continues into today.
+  if (range.skipToday && block.activityDates.some((date) => date > range.lastDate)) return false;
   return !range.firstDate || block.activityDates.some((date) => date >= range.firstDate && date <= range.lastDate);
 }
 
