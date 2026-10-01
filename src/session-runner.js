@@ -151,7 +151,7 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
     } catch (error) {
       errors.push(`${session.header.id}: ${error.message}`);
       sessionResults.push({ sessionId: session.header.id, status: "error", error: error.message });
-      range.onProgress?.({ ...progress, phase: "error", error: error.message });
+      range.onProgress?.({ ...progress, phase: "error", status: "FAILED", error: error.message });
       return;
     }
     const versions = journaledEntries.get(session.header.id) || [];
@@ -161,8 +161,14 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
     if (!selected.size) {
       sessionsSkipped++;
       const reason = blocks.length ? "outside date range" : "no journalable events";
+      const latestBlock = blocks.at(-1);
       sessionResults.push({ sessionId: session.header.id, status: "skipped", reason });
-      range.onProgress?.({ ...progress, phase: "skipped", status: reason });
+      range.onProgress?.({
+        ...progress,
+        ...(latestBlock && { project: latestBlock.project, date: latestBlock.date, time: latestBlock.time }),
+        phase: "skipped",
+        status: "SKIPPED",
+      });
       return;
     }
 
@@ -177,11 +183,11 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
           : undefined;
         const journalBlock = { ...block, continuationOf };
         const prerequisite = !blockInRange(block, range);
-        range.onProgress?.({ ...blockProgress, phase: "checking", status: "checking saved summary" });
+        range.onProgress?.({ ...blockProgress, phase: "checking", status: "CHECKING" });
         const cached = range.dryRun
           ? await inspectSessionSummary(modelClient, settings.cacheDirectory, journalBlock)
           : await saveSessionSummary(modelClient, settings.cacheDirectory, journalBlock, {
-            onGenerate: () => range.onProgress?.({ ...blockProgress, phase: "summarizing", status: "summarizing with Pi; large sessions may take a few minutes" }),
+            onGenerate: () => range.onProgress?.({ ...blockProgress, phase: "summarizing", status: "SUMMARIZING" }),
           });
         if (cached.reused) summariesReused++;
         else summariesCreated++;
@@ -239,14 +245,12 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
           prerequisite,
           sessionPath: cached.sessionPath,
           dailyPath: dailyEntry.dailyPath,
-          status: (range.dryRun
-            ? `${cached.reused ? "would reuse summary" : "would summarize with Pi"}, ${dailyEntry.updated ? "would update entry" : dailyEntry.appended ? "would append entry" : "entry already present"}`
-            : `${cached.reused ? "summary reused" : "summary created"}, ${dailyEntry.updated ? "entry updated" : dailyEntry.appended ? "entry appended" : "entry already present"}`) + (prerequisite ? " (earlier block needed for continuation link)" : ""),
+          status: range.dryRun ? "PREVIEW" : dailyEntry.updated ? "UPDATED" : dailyEntry.appended ? "SAVED" : "CURRENT",
         });
       } catch (error) {
         errors.push(`${session.header.id}: ${block.date} ${block.time}: ${error.message}`);
         sessionResults.push({ sessionId: session.header.id, blockId: block.blockId, status: "error", error: error.message });
-        range.onProgress?.({ ...blockProgress, phase: "error", error: error.message });
+        range.onProgress?.({ ...blockProgress, phase: "error", status: "FAILED", error: error.message });
       }
     }
   }

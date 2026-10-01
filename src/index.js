@@ -3,6 +3,7 @@ import path from "node:path";
 import { JOURNAL_SYSTEM_PROMPT, summaryCachePolicy } from "./journal.js";
 import { collectSessions, parseBackfillArgument, writeSessions } from "./session-runner.js";
 import { loadSettings } from "./settings.js";
+import { progressStatus } from "./cli-status.js";
 
 function requireJournalSettings(settings) {
   if (!settings.cacheDirectory) throw new Error("Run 'logdig init' or set PI_JOURNAL_DIR to a LogDig cache folder");
@@ -68,10 +69,11 @@ function notify(ctx, message, level = "info") {
 }
 
 function journalProgress(ctx) {
-  return ({ index, total, project, status, error, phase }) => {
-    const message = `LogDig [${index}/${total}]${project ? ` ${project}` : ""}: ${error || status}`;
+  return ({ index, total, sessionId, project, date, time, status }) => {
+    const label = `${date ? `${date}${time ? ` ${time}` : ""} · ` : ""}${project || sessionId}`;
+    const message = `LogDig [${index}/${total}] ${label} · ${progressStatus(status || "CHECKING")}`;
     if (ctx.hasUI) ctx.ui.setStatus?.("logdig", message);
-    else if (["summarizing", "complete", "error"].includes(phase)) console.log(message);
+    else console.log(message);
   };
 }
 

@@ -236,7 +236,7 @@ test("a dry run reports project, date, output file, and new summaries without ca
   const result = await runCli(["backfill", "1", "--dry-run"], w.env);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Dry run: no model requests, no file changes/);
-  assert.match(result.stdout, /demo-project · \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+  assert.match(result.stdout, /\d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project/);
   assert.match(result.stdout, /Daily note: .*Daily Notes/);
   assert.match(result.stdout, /Full summary: .*Sessions.*demo-session\.md/);
   assert.match(result.stdout, /Would create 1 summary, reuse 0, append 1 daily entry/);
@@ -344,7 +344,7 @@ test("CLI status and preview expose missing continuation prerequisites without g
   assert.match(status.stdout, /Includes 1 earlier block needed for continuation links/);
   const preview = await runCli(["backfill", "1", "--dry-run"], w.env);
   assert.equal(preview.code, 0, preview.stderr);
-  assert.match(preview.stdout, /earlier block needed for continuation link/);
+  assert.match(preview.stdout, /Includes this earlier block to establish the continuation link/);
   assert.match(preview.stdout, /Would create 2 summaries/);
   assert.deepEqual(await calls(w.callsPath), []);
   await assert.rejects(readdir(w.settings.cacheDirectory), { code: "ENOENT" });
@@ -376,7 +376,9 @@ test("real CLI backfill preserves handwritten notes, gives progress, and repeats
   await writeFile(dailyPath, original);
   const first = await runCli(["backfill", "1"], w.env);
   assert.equal(first.code, 0, first.stderr);
-  assert.match(first.stdout, /demo-project.*summarizing with Pi/);
+  assert.match(first.stdout, /\[1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project · SUMMARIZING/);
+  assert.match(first.stdout, /\[1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project · SAVED/);
+  assert.doesNotMatch(first.stdout, /large sessions may take a few minutes/);
   assert.match(first.stdout, /Saved: 1 summary created/);
   const daily = await readFile(dailyPath, "utf8");
   for (const text of ["Personal writing stays here.", "A handwritten log.", "# Tomorrow\n\nDon't lose this."]) assert.ok(daily.includes(text));
@@ -397,6 +399,18 @@ test("real CLI backfill preserves handwritten notes, gives progress, and repeats
   assert.equal(await readFile(path.join(w.settings.cacheDirectory, "Sessions", "demo-session.md"), "utf8"), cache);
   assert.equal(await readFile(path.join(w.settings.cacheDirectory, "Entries", `${entryId}.md`), "utf8"), snapshot);
   assert.equal((await calls(w.callsPath)).length, 1);
+});
+
+test("CLI backfill progress lists skipped sessions and uses date-first one-word statuses", async (t) => {
+  const w = await workspace(t);
+  await addSession(w.settings, { id: "outside-range", timestamp: Date.now() - 5 * 86400000 });
+  await addSession(w.settings, { id: "in-range" });
+
+  const result = await runCli(["backfill", "1", "--dry-run"], w.env);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /^\[1\/2\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project · SKIPPED$/m);
+  assert.match(result.stdout, /^\[2\/2\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project · CHECKING$/m);
+  assert.match(result.stdout, /^\[2\/2\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo-project · PREVIEW$/m);
 });
 
 test("CLI backfill updates an evolving session row and keeps a hand-edited blurb", async (t) => {

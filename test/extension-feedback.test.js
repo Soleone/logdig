@@ -212,7 +212,7 @@ test("the Pi extension shows progress before the model completes and prevents ov
   f.model.complete = () => modelPending;
   f.ctx.ui.setStatus = (key, text) => {
     f.statuses.push({ key, text });
-    if (text?.includes("summarizing with Pi")) started();
+    if (text?.includes("SUMMARIZING")) started();
   };
   const first = f.command("", f.ctx);
   try {
@@ -226,6 +226,7 @@ test("the Pi extension shows progress before the model completes and prevents ov
     await first;
   }
   assert.equal(f.notifications.at(-1).level, "success");
+  assert.ok(f.statuses.some(({ text }) => /\[1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · demo · SUMMARIZING/.test(text || "")));
   assert.equal(f.statuses.at(-1).text, undefined);
 });
 

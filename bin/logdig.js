@@ -9,7 +9,7 @@ import { spawnPiProcess } from "../src/pi-process.js";
 import { environmentOverrides, loadSettings, validateSettings } from "../src/settings.js";
 import { checkDirectory } from "../src/directories.js";
 import { configureLogDig } from "../src/setup.js";
-import { statusPrefix, statusPrefixWidth } from "../src/cli-status.js";
+import { progressStatus, statusPrefix, statusPrefixWidth } from "../src/cli-status.js";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const relativeEntry = path.relative(process.cwd(), fileURLToPath(import.meta.url)).split(path.sep).join("/");
@@ -194,9 +194,9 @@ async function backfill(args) {
   const result = await writeSessions(modelClient, found.sessions, settings, {
     ...found,
     dryRun,
-    onProgress: ({ index, total, sessionId, project, date, time, status, error, phase, sessionPath, dailyPath, prerequisite }) => {
-      if (["checking", "skipped"].includes(phase)) return;
-      console.log(`[${index}/${total}] ${project || sessionId}${date ? ` · ${date} ${time}` : ""}: ${error || status}`);
+    onProgress: ({ index, total, sessionId, project, date, time, status, sessionPath, dailyPath, prerequisite }) => {
+      const label = `${date ? `${date}${time ? ` ${time}` : ""} · ` : ""}${project || sessionId}`;
+      console.log(`[${index}/${total}] ${label} · ${progressStatus(status || "CHECKING")}`);
       if (dryRun && dailyPath) {
         console.log(`  Daily note: ${dailyPath}`);
         console.log(`  Full summary: ${sessionPath}`);

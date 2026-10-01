@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { statusPrefix, statusPrefixWidth, STATUS_WIDTH } from "../src/cli-status.js";
+import { progressStatus, statusPrefix, statusPrefixWidth, STATUS_WIDTH } from "../src/cli-status.js";
 
 test("interactive CLI status markers use colored Nerd Font icons", () => {
   assert.equal(statusPrefix("ok", { isTTY: true, term: "xterm-256color" }), "\u001b[32m\uf00c\u001b[0m ");
@@ -16,4 +16,18 @@ test("CLI status markers stay readable without a Nerd Font or color", () => {
   assert.equal(statusPrefix("error", { isTTY: true, icons: false }), "FIX   ");
   assert.equal(statusPrefix("ok", { isTTY: true, term: "xterm", noColor: true }), "\uf00c ");
   assert.equal(statusPrefixWidth({ isTTY: false }), 6);
+});
+
+test("backfill progress uses colored Nerd Font icons in terminals", () => {
+  assert.equal(progressStatus("CHECKING", { isTTY: true, term: "xterm-256color" }), "\u001b[36m\uf002\u001b[0m CHECKING");
+  assert.equal(progressStatus("SAVED", { isTTY: true, term: "xterm-256color" }), "\u001b[32m\uf00c\u001b[0m SAVED");
+  assert.equal(progressStatus("FAILED", { isTTY: true, term: "xterm-256color" }), "\u001b[31m\uf00d\u001b[0m FAILED");
+});
+
+test("backfill progress keeps one-word labels without Nerd Fonts or color", () => {
+  assert.equal(progressStatus("SUMMARIZING", { isTTY: false }), "SUMMARIZING");
+  assert.equal(progressStatus("SKIPPED", { isTTY: true, term: "dumb" }), "SKIPPED");
+  assert.equal(progressStatus("PREVIEW", { isTTY: true, term: "xterm", noColor: true }), "\uf06e PREVIEW");
+  assert.equal(progressStatus("UPDATED", { isTTY: true, term: "xterm", icons: false }), "UPDATED");
+  assert.throws(() => progressStatus("UNKNOWN", { isTTY: false }), /Unknown progress status/);
 });
