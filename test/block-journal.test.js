@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { appendDailyEntry, inspectSessionSummary, parseSessionNote, renderSessionNote } from "../src/journal.js";
+import { appendDailyEntry, inspectSessionSummary, parseSessionNote, renderSessionNote, summaryCachePolicy } from "../src/journal.js";
 import { writeSessions } from "../src/session-runner.js";
 import { workBlocksForSession } from "../src/work-blocks.js";
 
@@ -148,14 +148,15 @@ test("usage totals refresh without model requests or daily blurb edits", async (
   }
 });
 
-test("model policy is order-independent and future effort fields invalidate only summary freshness", async (t) => {
+test("model policy is order-independent and thinking levels invalidate only summary freshness", async (t) => {
   const f = await fixture(t);
   await writeSessions(f.model, [f.session], f.settings);
   const block = workBlocksForSession(f.session, f.settings.timeZone)[0];
   const initial = await inspectSessionSummary(f.model, f.settings.cacheDirectory, block);
-  const withEffort = { ...f.model, cachePolicy: { model: "test/fake", effort: "high" } };
+  assert.deepEqual(summaryCachePolicy({}), { model: "Pi default" });
+  const withEffort = { ...f.model, cachePolicy: summaryCachePolicy({ model: "test/fake", thinkingLevel: "high" }) };
   const effort = await inspectSessionSummary(withEffort, f.settings.cacheDirectory, block);
-  const reordered = await inspectSessionSummary({ ...f.model, cachePolicy: { effort: "high", model: "test/fake" } }, f.settings.cacheDirectory, block);
+  const reordered = await inspectSessionSummary({ ...f.model, cachePolicy: { thinkingLevel: "high", model: "test/fake" } }, f.settings.cacheDirectory, block);
   assert.notEqual(initial.cacheFingerprint, effort.cacheFingerprint);
   assert.equal(effort.cacheFingerprint, reordered.cacheFingerprint);
   assert.equal(initial.sourceFingerprint, effort.sourceFingerprint);
@@ -163,6 +164,11 @@ test("model policy is order-independent and future effort fields invalidate only
   assert.equal(updated.summariesCreated, 1);
   assert.equal(updated.entriesUpdated, 1);
   assert.equal(updated.sessionResults[0].blockId, block.blockId);
+  assert.equal((await writeSessions(withEffort, [f.session], f.settings)).summariesReused, 1);
+  const max = { ...f.model, cachePolicy: summaryCachePolicy({ model: "test/fake", thinkingLevel: "max" }) };
+  const changed = await inspectSessionSummary(max, f.settings.cacheDirectory, block);
+  assert.equal(changed.reused, false);
+  assert.equal(changed.sourceFingerprint, initial.sourceFingerprint);
 });
 
 test("continuation updates preserve edited blurbs without duplicating generated continuation links", async (t) => {

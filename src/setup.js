@@ -76,14 +76,18 @@ export async function configureLogDig(settings, commandName = "logdig") {
     console.log("\n2. Pi and privacy");
     console.log(`History: ${settings.sessionDirectory}`);
     console.log(`Model: ${settings.model || "Pi's default (your active model for /journal)"}`);
-    const advanced = await ask("Change history folder, Pi executable, or model? (yes/no)", "no", yesNo);
-    let { sessionDirectory, piCommand, model } = settings;
+    console.log(`Thinking: ${settings.thinkingLevel || "default (no LogDig override)"}`);
+    const advanced = await ask("Change history folder, Pi executable, model, or thinking level? (yes/no)", "no", yesNo);
+    let { sessionDirectory, piCommand, model, thinkingLevel } = settings;
     if (advanced) {
       sessionDirectory = await ask("Pi session-history folder", sessionDirectory,
         (value) => folder("sessionDirectory", value, false));
       piCommand = await ask("Pi executable", piCommand, (value) => field("piCommand", value));
       model = await ask("Model (provider/model), or 'default'", model || "default",
         (value) => value.toLowerCase() === "default" ? undefined : field("model", value));
+      console.log("More thinking can help distinguish attempts from outcomes, but takes longer and may cost more. Support depends on the model.");
+      thinkingLevel = await ask("Thinking level (default/off/minimal/low/medium/high/xhigh/max)", thinkingLevel || "default",
+        (value) => field("thinkingLevel", value));
     }
     console.log("Summarizing sends selected, redacted history to your Pi model. Provider charges may apply.");
     console.log("Common secrets are redacted, but this is not a complete secret scanner. Pi keeps your credentials.");
@@ -91,7 +95,7 @@ export async function configureLogDig(settings, commandName = "logdig") {
     const autoCapture = await ask("Capture on Pi shutdown? (yes/no)", settings.autoCapture ? "yes" : "no", yesNo);
     installExtension = await ask("Install the Pi extension for /journal? (yes/no)", "no", yesNo);
 
-    nextSettings = { ...settings, cacheDirectory, dailyDirectory, dailyHeader, dailySummary, timeZone, sessionDirectory, piCommand, model, autoCapture };
+    nextSettings = { ...settings, cacheDirectory, dailyDirectory, dailyHeader, dailySummary, timeZone, sessionDirectory, piCommand, model, thinkingLevel, autoCapture };
     console.log([
       "",
       "Ready to save",
@@ -102,6 +106,7 @@ export async function configureLogDig(settings, commandName = "logdig") {
       `  History:     ${sessionDirectory}`,
       `  Pi:          ${piCommand}`,
       `  Model:       ${model || "Pi default"}`,
+      `  Thinking:    ${thinkingLevel || "default (no LogDig override)"}`,
       `  Auto-capture: ${autoCapture ? "on" : "off"}`,
       `  Extension:   ${installExtension ? "install now" : "leave unchanged"}`,
       "Missing note and cache folders will be created on your first real backfill.",

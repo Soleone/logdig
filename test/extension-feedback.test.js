@@ -17,7 +17,7 @@ async function extensionFixture(t, settingsPatch = {}) {
   await mkdir(settings.sessionDirectory, { recursive: true });
   const filePath = path.join(root, "settings.json");
   await saveSettings(settings, filePath);
-  const keys = ["LOGDIG_CONFIG_PATH", "PI_CODING_AGENT_SESSION_DIR", "PI_JOURNAL_DIR", "PI_JOURNAL_DAILY_DIR", "PI_JOURNAL_DAILY_HEADER", "PI_JOURNAL_DAILY_SUMMARY", "PI_JOURNAL_TIMEZONE", "PI_JOURNAL_MODEL", "PI_JOURNAL_AUTO", "PI_JOURNAL_PI_COMMAND"];
+  const keys = ["LOGDIG_CONFIG_PATH", "PI_CODING_AGENT_SESSION_DIR", "PI_JOURNAL_DIR", "PI_JOURNAL_DAILY_DIR", "PI_JOURNAL_DAILY_HEADER", "PI_JOURNAL_DAILY_SUMMARY", "PI_JOURNAL_TIMEZONE", "PI_JOURNAL_MODEL", "PI_JOURNAL_THINKING", "PI_JOURNAL_AUTO", "PI_JOURNAL_PI_COMMAND"];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   for (const key of keys) delete process.env[key];
   process.env.LOGDIG_CONFIG_PATH = filePath;
@@ -36,7 +36,7 @@ async function extensionFixture(t, settingsPatch = {}) {
   });
   const notifications = [];
   const statuses = [];
-  const model = { calls: 0, complete: async () => response };
+  const model = { calls: 0, requests: [], complete: async () => response };
   const entries = [{ type: "message", timestamp: Date.now(), message: { role: "user", content: "Improve this project." } }];
   const ctx = {
     hasUI: true,
@@ -48,7 +48,16 @@ async function extensionFixture(t, settingsPatch = {}) {
     modelRegistry: {
       find: () => undefined,
       hasConfiguredAuth: () => true,
-      complete: async (...args) => { model.calls++; return model.complete(...args); },
+      complete: async (...args) => {
+        model.calls++;
+        model.requests.push({ method: "complete", args });
+        return model.complete(...args);
+      },
+      streamSimple: (...args) => {
+        model.calls++;
+        model.requests.push({ method: "streamSimple", args });
+        return { result: () => model.complete(...args) };
+      },
     },
     sessionManager: {
       getHeader: () => ({ type: "session", id: "current-session", cwd: "/work/demo" }),
@@ -58,6 +67,76 @@ async function extensionFixture(t, settingsPatch = {}) {
   };
   return { root, settings, ctx, entries, model, command, shutdown, notifications, statuses };
 }
+
+test("journal passes every explicit thinking level through provider-neutral requests", async (t) => {
+  for (const thinkingLevel of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+    await t.test(thinkingLevel, async (t) => {
+      const f = await extensionFixture(t, { thinkingLevel });
+      const signal = new AbortController().signal;
+      f.ctx.signal = signal;
+      await f.command("", f.ctx);
+      assert.equal(f.notifications.at(-1).level, "success");
+      assert.equal(f.model.calls, 1);
+      const { method, args: [model, context, options] } = f.model.requests[0];
+      assert.equal(method, "streamSimple");
+      assert.equal(model, f.ctx.model);
+      assert.equal(options.reasoning, thinkingLevel === "off" ? undefined : thinkingLevel);
+      assert.equal(options.signal, signal);
+      assert.equal(options.cacheRetention, "none");
+      assert.ok(options.sessionId);
+      assert.match(context.systemPrompt, /Do not invent/);
+      assert.equal(context.messages[0].role, "user");
+      await f.command("", f.ctx);
+      assert.equal(f.model.calls, 1);
+    });
+  }
+});
+
+test("configured thinking and model apply to chunk extraction, final synthesis, backfill, and shutdown", async (t) => {
+  const f = await extensionFixture(t, { model: "test/cheap", thinkingLevel: "max", autoCapture: true });
+  const selected = { provider: "test", id: "cheap" };
+  f.ctx.modelRegistry.find = (provider, id) => {
+    assert.equal(provider, "test");
+    assert.equal(id, "cheap");
+    return selected;
+  };
+  const started = Date.now();
+  for (let index = 0; index < 12; index++) {
+    f.entries.push({ type: "message", timestamp: started + index * 1000, message: { role: "user", content: `Stage ${index}: ${"Detailed project work. ".repeat(110)}` } });
+  }
+  f.model.complete = async (_model, context) => context.messages[0].content[0].text.includes("Extract a compact factual timeline")
+    ? { stopReason: "stop", content: [{ type: "text", text: JSON.stringify({ timeline: "12:00 Made progress; next steps remain." }) }] }
+    : response;
+  await f.command("backfill 1 --dry-run", f.ctx);
+  assert.equal(f.model.calls, 0);
+  assert.match(f.notifications.at(-1).message, /would create 1 summary/);
+  await f.command("backfill 1", f.ctx);
+  assert.equal(f.notifications.at(-1).level, "success");
+  assert.ok(f.model.calls >= 3);
+  assert.match(f.model.requests[0].args[1].messages[0].content[0].text, /Extract a compact factual timeline/);
+  assert.match(f.model.requests.at(-1).args[1].messages[0].content[0].text, /Write three journal layers/);
+  const count = f.model.calls;
+  await f.command("", f.ctx);
+  assert.equal(f.model.calls, count);
+  f.entries.push({ type: "message", timestamp: started + 13_000, message: { role: "user", content: "Record the follow-up." } });
+  await f.shutdown({}, f.ctx);
+  assert.ok(f.model.calls > count);
+  for (const { method, args: [model, _context, options] } of f.model.requests) {
+    assert.equal(method, "streamSimple");
+    assert.equal(model, selected);
+    assert.equal(options.reasoning, "max");
+  }
+  await saveSettings({ ...f.settings, thinkingLevel: "high" }, path.join(f.root, "settings.json"));
+  await f.command("backfill 1 --dry-run", f.ctx);
+  assert.match(f.notifications.at(-1).message, /would create 1 summary/);
+});
+
+test("default thinking preserves existing provider requests instead of inheriting session effort", async (t) => {
+  const f = await extensionFixture(t, { thinkingLevel: "default" });
+  await f.command("", f.ctx);
+  assert.equal(f.model.requests[0].method, "complete");
+  assert.equal(Object.hasOwn(f.model.requests[0].args[2], "reasoning"), false);
+});
 
 test("an empty active session gets a useful next step, not a false save success", async (t) => {
   const f = await extensionFixture(t);

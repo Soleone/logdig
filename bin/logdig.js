@@ -124,6 +124,7 @@ async function doctor() {
     issues++;
   }
   console.log(`\nSummary model: ${settings.model || "Pi startup default"}`);
+  console.log(`Thinking: ${settings.thinkingLevel || "Pi startup default"}`);
   console.log("Authentication is checked only when you request a summary. If it fails, open Pi and run /login.");
   if (issues) {
     console.error(`\n${issues} thing${issues === 1 ? "" : "s"} to fix. Address the FIX lines above, then run '${commandName} doctor' again.`);
@@ -138,6 +139,7 @@ async function backfill(args) {
   let daysArgument;
   let dryRun = false;
   let selectedModel = settings.model;
+  let selectedThinking = settings.thinkingLevel;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--dry-run") {
@@ -147,6 +149,11 @@ async function backfill(args) {
       if (!selectedModel || selectedModel.startsWith("-")) throw new Error("--model requires provider/model, or 'default' to use Pi's startup model");
     } else if (arg.startsWith("--model=")) {
       selectedModel = arg.slice("--model=".length);
+    } else if (arg === "--thinking") {
+      selectedThinking = args[++index];
+      if (!selectedThinking || selectedThinking.startsWith("-")) throw new Error("--thinking requires default, off, minimal, low, medium, high, xhigh, or max");
+    } else if (arg.startsWith("--thinking=")) {
+      selectedThinking = arg.slice("--thinking=".length);
     } else if (!arg.startsWith("-") && daysArgument === undefined) {
       daysArgument = arg;
     } else {
@@ -154,7 +161,9 @@ async function backfill(args) {
     }
   }
   selectedModel = selectedModel?.trim().toLowerCase() === "default" ? undefined : selectedModel;
-  selectedModel = validateSettings({ ...settings, model: selectedModel }).model;
+  const generationSettings = validateSettings({ ...settings, model: selectedModel, thinkingLevel: selectedThinking });
+  selectedModel = generationSettings.model;
+  selectedThinking = generationSettings.thinkingLevel;
   const range = parseBackfillArgument(daysArgument);
   requireJournalPaths(settings);
 
@@ -162,6 +171,7 @@ async function backfill(args) {
   console.log(`Daily notes: ${settings.dailyDirectory} (${settings.dailyHeader}, ${settings.dailySummary})`);
   console.log(`Summary cache: ${path.join(settings.cacheDirectory, "Sessions")}`);
   console.log(`Model: ${selectedModel || "Pi startup default"}`);
+  console.log(`Thinking: ${selectedThinking || "Pi startup default"}`);
   console.log(dryRun
     ? "Dry run: no model requests, no file changes, and no folders created."
     : "Only new or changed work blocks need summarizing. Selected, redacted history is sent to Pi's model; provider charges may apply.");
@@ -177,7 +187,7 @@ async function backfill(args) {
     return;
   }
 
-  const modelClient = createPiModelClient({ ...settings, model: selectedModel });
+  const modelClient = createPiModelClient(generationSettings);
   const result = await writeSessions(modelClient, found.sessions, settings, {
     ...found,
     dryRun,
@@ -211,7 +221,7 @@ async function backfill(args) {
     console.warn(dryRun ? "Preview incomplete. Fix the issues above, then preview again." : "Some sessions could not be saved. Successful summaries are cached. Fix the issues above and rerun the same command to retry.");
     process.exitCode = 1;
   } else if (dryRun && result.dates.length) {
-    console.log(`\nWhen you're ready: ${commandName} backfill ${range.all ? "all" : range.days}${selectedModel ? ` --model ${selectedModel}` : settings.model ? " --model default" : ""}`);
+    console.log(`\nWhen you're ready: ${commandName} backfill ${range.all ? "all" : range.days}${selectedModel ? ` --model ${selectedModel}` : settings.model ? " --model default" : ""}${selectedThinking ? ` --thinking ${selectedThinking}` : settings.thinkingLevel ? " --thinking default" : ""}`);
   }
 }
 
@@ -347,6 +357,7 @@ function helpText() {
     "  logdig doctor                       check paths and Pi without a model request",
     "  logdig config                       show settings and active environment overrides",
     "  logdig backfill [N|all] [--dry-run] [--model provider/model|default]",
+    "                                      [--thinking default|off|minimal|low|medium|high|xhigh|max]",
     "                                      journal saved sessions (default: last 3 days)",
     "  logdig status [N|all] [--json]       show journal coverage (default: last 3 days; read-only)",
     "  logdig pi-install | pi-uninstall     add or remove /journal integration",
@@ -357,7 +368,8 @@ function helpText() {
     "",
     "Real backfill uses Pi's startup model and existing authentication. Tools,",
     "extensions, project context, and session saving are disabled for model requests.",
-    "Use --model default to ignore a saved model override for one run.",
+    "Use --model default or --thinking default to ignore that saved override for one run.",
+    "More thinking may improve accuracy, but can increase latency and token cost.",
     "More help: README.md and QUICKSTART.md",
   ].join("\n");
 }

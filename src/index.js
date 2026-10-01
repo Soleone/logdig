@@ -41,20 +41,23 @@ function extensionModelClient(ctx, settings) {
       if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
         throw new Error(`No configured authentication for ${model.provider}/${model.id}. Run /login in Pi, then try /journal again`);
       }
-      return ctx.modelRegistry.complete(
-        model,
-        {
-          systemPrompt: JOURNAL_SYSTEM_PROMPT,
-          messages: [
-            {
-              role: "user",
-              content: [{ type: "text", text: prompt }],
-              timestamp: Date.now(),
-            },
-          ],
-        },
-        { sessionId: randomUUID(), cacheRetention: "none", signal: ctx.signal },
-      );
+      const context = {
+        systemPrompt: JOURNAL_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: prompt }],
+            timestamp: Date.now(),
+          },
+        ],
+      };
+      const options = { sessionId: randomUUID(), cacheRetention: "none", signal: ctx.signal };
+      // Preserve existing provider defaults unless LogDig explicitly selects thinking.
+      if (settings.thinkingLevel === undefined) return ctx.modelRegistry.complete(model, context, options);
+      return ctx.modelRegistry.streamSimple(model, context, {
+        ...options,
+        reasoning: settings.thinkingLevel === "off" ? undefined : settings.thinkingLevel,
+      }).result();
     },
   };
 }

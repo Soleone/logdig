@@ -10,6 +10,7 @@ const ENVIRONMENT_SETTINGS = [
   ["PI_JOURNAL_DAILY_SUMMARY", "dailySummary"],
   ["PI_JOURNAL_TIMEZONE", "timeZone"],
   ["PI_JOURNAL_MODEL", "model"],
+  ["PI_JOURNAL_THINKING", "thinkingLevel"],
   ["PI_JOURNAL_PI_COMMAND", "piCommand"],
   ["PI_CODING_AGENT_SESSION_DIR", "sessionDirectory"],
 ];
@@ -85,6 +86,14 @@ export function validateSettings(settings, { requirePaths = false, home = homedi
     if (!provider || !modelId) throw new Error("model must use provider/model format");
     settings.model = `${provider}/${modelId}`;
   }
+  if (settings.thinkingLevel !== undefined) {
+    if (typeof settings.thinkingLevel !== "string") throw new Error("thinkingLevel must be default, off, minimal, low, medium, high, xhigh, or max");
+    const level = settings.thinkingLevel.trim().toLowerCase();
+    if (!["default", "off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(level)) {
+      throw new Error("thinkingLevel must be default, off, minimal, low, medium, high, xhigh, or max");
+    }
+    settings.thinkingLevel = level === "default" ? undefined : level;
+  }
   if (settings.autoCapture !== undefined && typeof settings.autoCapture !== "boolean") {
     throw new Error("autoCapture must be a boolean");
   }
@@ -144,6 +153,7 @@ export async function saveSettings(settings, filePath = settings.filePath || set
     piCommand: settings.piCommand || "pi",
     autoCapture: settings.autoCapture === true,
     ...(settings.model ? { model: settings.model } : {}),
+    ...(settings.thinkingLevel !== undefined ? { thinkingLevel: settings.thinkingLevel } : {}),
   };
   validateSettings(persisted, { requirePaths: true });
 

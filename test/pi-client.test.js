@@ -42,7 +42,7 @@ function fakeSpawn({ output = jsonOutput('{"ok":true}'), exitCode = 0, stderr = 
 
 test("Pi client makes a one-shot, no-tools, no-session request and honors model overrides", async () => {
   const fake = fakeSpawn({ output: jsonOutput('  {"small":"done"}  ') });
-  const client = createPiModelClient({ piCommand: "pi-test", model: "openai/gpt-4.1" }, { spawnProcess: fake.spawnProcess });
+  const client = createPiModelClient({ piCommand: "pi-test", model: "openai/gpt-4.1", thinkingLevel: "max" }, { spawnProcess: fake.spawnProcess });
   const result = await client.complete("redacted journal prompt");
   const launch = fake.getLaunch();
 
@@ -56,10 +56,12 @@ test("Pi client makes a one-shot, no-tools, no-session request and honors model 
   assert.ok(launch.args.includes("--no-extensions"));
   assert.ok(launch.args.includes("--no-context-files"));
   assert.equal(launch.args[launch.args.indexOf("--model") + 1], "openai/gpt-4.1");
+  assert.equal(launch.args[launch.args.indexOf("--thinking") + 1], "max");
+  assert.ok(launch.args.indexOf("--thinking") < launch.args.indexOf("--"));
   assert.ok(launch.args.includes("--"));
   assert.equal(fake.getInput(), "redacted journal prompt");
   assert.equal(client.modelLabel, "openai/gpt-4.1");
-  assert.deepEqual(client.cachePolicy, { model: "openai/gpt-4.1" });
+  assert.deepEqual(client.cachePolicy, { model: "openai/gpt-4.1", thinkingLevel: "max" });
 });
 
 test("Pi client leaves model selection to Pi when no override is configured", async () => {
@@ -67,8 +69,30 @@ test("Pi client leaves model selection to Pi when no override is configured", as
   const client = createPiModelClient({ piCommand: "pi" }, { spawnProcess: fake.spawnProcess });
   await client.complete("prompt");
   assert.equal(fake.getLaunch().args.includes("--model"), false);
+  assert.equal(fake.getLaunch().args.includes("--thinking"), false);
   assert.equal(client.modelLabel, "Pi startup default");
   assert.deepEqual(client.cachePolicy, { model: "Pi default" });
+});
+
+test("Pi client passes thinking independently of model and allows slow reasoning requests", async (t) => {
+  const delays = [];
+  const setTimer = globalThis.setTimeout;
+  t.mock.method(globalThis, "setTimeout", (callback, delay, ...args) => {
+    delays.push(delay);
+    return setTimer(callback, delay, ...args);
+  });
+  for (const thinkingLevel of [undefined, "off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+    const fake = fakeSpawn();
+    const client = createPiModelClient({ piCommand: "pi", thinkingLevel }, { spawnProcess: fake.spawnProcess });
+    await client.complete("prompt");
+    const args = fake.getLaunch().args;
+    assert.equal(args.includes("--model"), false);
+    if (thinkingLevel !== undefined) {
+      assert.equal(args[args.indexOf("--thinking") + 1], thinkingLevel);
+      assert.deepEqual(client.cachePolicy, { model: "Pi default", thinkingLevel });
+    }
+    assert.equal(delays.at(-1), thinkingLevel && thinkingLevel !== "off" ? 30 * 60_000 : 5 * 60_000);
+  }
 });
 
 test("Pi client aggregates completed responses and rejects failed JSON runs", async () => {

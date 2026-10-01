@@ -106,7 +106,7 @@ Date ranges select actual conversation activity, not just assigned journal dates
 
 ### Summary reuse and existing journals
 
-Summary freshness is based on the selected, redacted evidence and bounded earlier context, plus summary-processing version, timezone, and configured generation policy. Earlier context is drawn from the preceding block's evidence, not its generated summary, and is marked as background rather than work to repeat. Metadata-only changes do not trigger model requests; usage totals can refresh separately. Explicit LogDig model changes invalidate summaries, while changes to Pi's default model do not force regeneration under the default policy.
+Summary freshness is based on the selected, redacted evidence and bounded earlier context, plus summary-processing version, timezone, and configured generation policy. Earlier context is drawn from the preceding block's evidence, not its generated summary, and is marked as background rather than work to repeat. Metadata-only changes do not trigger model requests; usage totals can refresh separately. Explicit LogDig model or thinking-level changes invalidate summaries, while changes to Pi's defaults do not force regeneration under the default policy.
 
 The identifier in each timestamp link prevents duplicate entries, without HTML comments. Older project-name links and comment-wrapped entries are still recognized. When a block evolves, LogDig replaces only that block's daily-note row with a link to the latest summary. Earlier blocks stay in place. Previous linked summary snapshots remain in `Entries/`, and manually edited daily summaries are preserved; usage metadata may be refreshed without regenerating the prose.
 
@@ -129,8 +129,9 @@ logdig backfill                     journal the last 3 calendar days
 logdig backfill 7 --dry-run          preview seven days without changing anything
 logdig backfill all --dry-run        preview every discoverable saved session
 logdig backfill 7                    journal seven days
-logdig backfill 7 --model provider/model
+logdig backfill 7 --model provider/model --thinking max
 logdig backfill 7 --model default    ignore a saved model override for this run
+logdig backfill 7 --thinking default ignore a saved thinking override for this run
 logdig status                       show coverage for the last 3 calendar days
 logdig status 7                     show coverage for seven days
 logdig status all --json            output coverage for every saved session as JSON
@@ -174,6 +175,10 @@ Automatic capture is opt-in through `logdig init` or `PI_JOURNAL_AUTO=1`. It cat
 CLI backfill uses Pi's normal startup model and existing authentication unless you configure a `provider/model` override. It runs headless requests with **tools, extensions, skills, prompt templates, project context files, and session saving disabled**. Providers supplied only by extensions are therefore not available to CLI backfill.
 
 `/journal` uses the current Pi model, including registered providers, unless a LogDig override is set. The preview needs no available model or authentication. `doctor` checks the executable but does not validate model authentication; open Pi and run `/login` if a real save reports an authentication problem.
+
+Choose a **thinking level** alongside the model in setup's advanced settings, or use `--thinking` for one CLI backfill. Supported values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`; `default` removes the LogDig override. Saved settings use `thinkingLevel`, and `PI_JOURNAL_THINKING` overrides it. This applies to intermediate timeline extraction and final summaries, including `/journal` and automatic capture. Support and effort mapping depend on the model and Pi provider, so `max` is not necessarily a distinct supported tier on every model.
+
+More thinking can help separate proposals, failed attempts, and verified outcomes, but can increase latency and token cost. Explicitly enabled thinking allows CLI requests up to 30 minutes each, rather than the usual five; providers may impose their own timeouts. With no LogDig override, CLI backfill keeps Pi's startup thinking policy, while `/journal` keeps its existing provider-default behavior and does **not** inherit the active session's thinking level. Select an explicit level for consistent control in both paths. Changing it causes selected cached summaries to need regeneration; preview first to see the scope.
 
 Selected user prompts, assistant conclusions, tool actions, test results, and error excerpts are sent to the chosen model after common credential redaction. System prompts, hidden reasoning, and image payloads are excluded. **Redaction is not a comprehensive secret scanner.** Review your provider's data handling before processing sensitive sessions or enabling automatic capture. Summaries can also contain private project details, so treat your cache and vault accordingly.
 

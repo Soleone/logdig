@@ -322,7 +322,10 @@ async function readMarkdownIfPresent(filePath) {
 }
 
 export function summaryCachePolicy(settings) {
-  return { model: settings.model || "Pi default" };
+  return {
+    model: settings.model || "Pi default",
+    ...(settings.thinkingLevel !== undefined ? { thinkingLevel: settings.thinkingLevel } : {}),
+  };
 }
 
 function updateContinuationReference(markdown, continuationOf) {
@@ -335,7 +338,7 @@ function updateContinuationReference(markdown, continuationOf) {
 
 export async function inspectSessionSummary(modelClient, cacheDirectory, session) {
   const sourceFingerprint = hashValue([session.project, session.timezone, session.context || [], session.events]);
-  // Keep generation policy separate from evidence so future effort settings can
+  // Keep generation policy separate from evidence so model and thinking changes can
   // invalidate summaries without changing work-block identity or range selection.
   const policy = Object.entries(modelClient.cachePolicy || { model: "Pi default" }).sort(([left], [right]) => left.localeCompare(right));
   const cacheFingerprint = hashValue([SUMMARY_VERSION, JOURNAL_SYSTEM_PROMPT, CHUNK_LIMIT, sourceFingerprint, policy]);

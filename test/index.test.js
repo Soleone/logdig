@@ -9,6 +9,7 @@ import { saveSettings } from "../src/settings.js";
 const environmentKeys = [
   "LOGDIG_CONFIG_PATH",
   "PI_JOURNAL_MODEL",
+  "PI_JOURNAL_THINKING",
   "PI_JOURNAL_PI_COMMAND",
   "PI_CODING_AGENT_SESSION_DIR",
   "PI_JOURNAL_DIR",

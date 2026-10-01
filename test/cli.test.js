@@ -114,7 +114,7 @@ test("CLI help and subcommand help work before setup without writing settings", 
   assert.deepEqual(await calls(w.callsPath), []);
 });
 
-test("setup explains choices and recovers locally from invalid paths, headings, summaries, timezone, model, and yes/no input", async (t) => {
+test("setup explains choices and recovers locally from invalid paths, headings, summaries, timezone, model, thinking, and yes/no input", async (t) => {
   const w = await workspace(t, { configured: false });
   const notAFolder = path.join(w.root, "a-file.md");
   await writeFile(notAFolder, "keep this");
@@ -128,6 +128,7 @@ test("setup explains choices and recovers locally from invalid paths, headings, 
     notAFolder, w.settings.sessionDirectory,
     w.settings.piCommand,
     "invalid-model", "test/fake",
+    "ultra", "MAX",
     "later", "no",
     "no",
     "yes",
@@ -145,6 +146,8 @@ test("setup explains choices and recovers locally from invalid paths, headings, 
   assert.equal(saved.dailySummary, "medium");
   assert.equal(saved.timeZone, "UTC");
   assert.equal(saved.model, "test/fake");
+  assert.equal(saved.thinkingLevel, "max");
+  assert.match(result.stdout, /Thinking:\s+max/);
   assert.equal(saved.autoCapture, false);
   assert.equal(await readFile(notAFolder, "utf8"), "keep this");
   await assert.rejects(readdir(w.settings.cacheDirectory), { code: "ENOENT" });
@@ -467,6 +470,76 @@ test("backfill validates empty model options and strict day counts, and other co
     assert.equal(result.code, 1, args.join(" "));
     assert.match(result.stderr, /provider\/model|Choose 1 to 3650|Unknown backfill argument|does not accept arguments/);
   }
+  assert.deepEqual(await calls(w.callsPath), []);
+});
+
+test("CLI thinking overrides are validated, previewed, passed to Pi, and do not change saved settings", async (t) => {
+  const w = await workspace(t);
+  await addSession(w.settings);
+  await saveSettings({ ...w.settings, thinkingLevel: "high" }, w.filePath);
+  for (const args of [["--thinking="], ["--thinking"], ["--thinking", "--dry-run"], ["--thinking", "ultra"]]) {
+    const invalid = await runCli(["backfill", "1", ...args], w.env);
+    assert.equal(invalid.code, 1, args.join(" "));
+    assert.match(invalid.stderr, /thinkingLevel|--thinking requires/);
+  }
+  const preview = await runCli(["backfill", "1", "--dry-run", "--model", "test/other", "--thinking", "MAX"], w.env);
+  assert.equal(preview.code, 0, preview.stderr);
+  assert.match(preview.stdout, /Model: test\/other/);
+  assert.match(preview.stdout, /Thinking: max/);
+  assert.match(preview.stdout, /When you're ready: .* --model test\/other --thinking max/);
+  assert.deepEqual(await calls(w.callsPath), []);
+  const actual = await runCli(["backfill", "1", "--model=test/other", "--thinking=max"], w.env);
+  assert.equal(actual.code, 0, actual.stderr);
+  const [args] = await calls(w.callsPath);
+  assert.equal(args[args.indexOf("--model") + 1], "test/other");
+  assert.equal(args[args.indexOf("--thinking") + 1], "max");
+  const saved = await loadSettings({ filePath: w.filePath, env: {} });
+  assert.equal(saved.model, "test/fake");
+  assert.equal(saved.thinkingLevel, "high");
+});
+
+test("thinking settings affect cache freshness, status, environment reporting, and can be cleared for one run", async (t) => {
+  const w = await workspace(t);
+  await addSession(w.settings);
+  assert.equal((await runCli(["backfill", "1"], w.env)).code, 0);
+  await saveSettings({ ...w.settings, thinkingLevel: "max" }, w.filePath);
+  const report = JSON.parse((await runCli(["status", "1", "--json"], w.env)).stdout);
+  assert.equal(report.totals.stale, 1);
+  assert.equal(report.totals.needsSummarizing, 1);
+  const preview = await runCli(["backfill", "1", "--dry-run"], w.env);
+  assert.match(preview.stdout, /Thinking: max/);
+  assert.match(preview.stdout, /Would create 1 summary, reuse 0/);
+  const cleared = await runCli(["backfill", "1", "--dry-run", "--thinking", "default"], w.env);
+  assert.match(cleared.stdout, /Thinking: Pi startup default/);
+  assert.match(cleared.stdout, /Would create 0 summaries, reuse 1/);
+  assert.match(cleared.stdout, /When you're ready: .* --thinking default/);
+  const actual = await runCli(["backfill", "1", "--thinking=default", "--model=test/other"], w.env);
+  assert.equal(actual.code, 0, actual.stderr);
+  assert.equal((await calls(w.callsPath))[1].includes("--thinking"), false);
+  const env = { ...w.env, PI_JOURNAL_THINKING: "off" };
+  const config = await runCli(["config"], env);
+  assert.match(config.stdout, /"thinkingLevel": "off"/);
+  assert.match(config.stdout, /Environment overrides: PI_JOURNAL_THINKING/);
+  const doctor = await runCli(["doctor"], env);
+  assert.match(doctor.stdout, /Thinking: off/);
+  const overridden = await runCli(["backfill", "1"], env);
+  assert.equal(overridden.code, 0, overridden.stderr);
+  const args = (await calls(w.callsPath)).at(-1);
+  assert.equal(args[args.indexOf("--thinking") + 1], "off");
+  const repeated = await runCli(["backfill", "1"], env);
+  assert.match(repeated.stdout, /0 summaries created, 1 reused/);
+  assert.equal((await loadSettings({ filePath: w.filePath, env: {} })).thinkingLevel, "max");
+});
+
+test("setup can clear a saved thinking override without changing the selected model", async (t) => {
+  const w = await workspace(t);
+  await saveSettings({ ...w.settings, thinkingLevel: "max" }, w.filePath);
+  const input = ["", "", "", "", "", "yes", "", "", "", "default", "no", "no", "yes"].join("\n") + "\n";
+  const result = await runCli(["init"], w.env, { input });
+  assert.equal(result.code, 0, result.stderr);
+  const saved = await loadSettings({ filePath: w.filePath, env: {} });
+  assert.equal(saved.thinkingLevel, undefined);
+  assert.equal(saved.model, "test/fake");
   assert.deepEqual(await calls(w.callsPath), []);
 });
 

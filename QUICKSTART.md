@@ -19,7 +19,7 @@ In the wizard:
 - **Summary cache:** choose `My Vault/LogDig` to keep the full summaries visible in Obsidian.
 - **Heading and length:** `# Projects` and `small` are a good first try. Your personal `# Log` stays separate.
 - **Timezone:** check that this is the timezone you journal in.
-- **Advanced settings:** leave them alone unless you use a custom Pi history folder, executable, or model.
+- **Advanced settings:** choose a custom Pi history folder, executable, model, or thinking level here. Thinking defaults to no LogDig override; choose an explicit level such as `max` for a cost-first reasoning model if you are willing to wait longer.
 - **Automatic capture:** choose **no** for now.
 - **Pi extension:** optional. The CLI works without it.
 
@@ -50,6 +50,8 @@ Once the preview looks right, run the same range without `--dry-run`:
 ```sh
 logdig backfill 1
 ```
+
+To override the model and thinking level for one run, use `logdig backfill 1 --model provider/model --thinking max`. Use `--thinking default` to ignore a saved thinking override. More thinking may improve factual reconstruction, but can increase latency and token cost; available effort depends on the model. Saved thinking preferences also apply to `/journal` and automatic capture.
 
 This may send selected, redacted history to your Pi model and incur provider charges. Pi uses its existing authentication. If authentication fails, open Pi, run `/login`, then retry. Common secrets are redacted, but redaction is not a complete secret scanner.
 

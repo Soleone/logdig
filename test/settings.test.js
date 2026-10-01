@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { environmentOverrides, loadSettings, saveSettings, settingsFilePath } from "../src/settings.js";
+import { environmentOverrides, loadSettings, saveSettings, settingsFilePath, validateSettings } from "../src/settings.js";
 
 test("settings use the standard per-machine config location for each OS", () => {
   assert.equal(
@@ -77,6 +77,31 @@ test("settings round-trip without storing credentials and environment values ove
     assert.deepEqual(environmentOverrides({ PI_JOURNAL_AUTO: "", PI_JOURNAL_DIR: "" }), ["PI_JOURNAL_AUTO"]);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("thinking levels round-trip, normalize, and allow independent environment overrides", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "logdig-thinking-settings-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, "settings.json");
+  const settings = await loadSettings({ filePath, env: {}, home: root });
+  assert.equal(settings.thinkingLevel, undefined);
+  const required = { ...settings, cacheDirectory: path.join(root, "cache"), dailyDirectory: path.join(root, "daily"), model: "test/fake" };
+  for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+    await saveSettings({ ...required, thinkingLevel: ` ${level.toUpperCase()} ` }, filePath);
+    assert.equal((await loadSettings({ filePath, env: {}, home: root })).thinkingLevel, level);
+  }
+  const overridden = await loadSettings({ filePath, env: { PI_JOURNAL_THINKING: "OFF" }, home: root });
+  assert.equal(overridden.thinkingLevel, "off");
+  assert.equal(overridden.model, "test/fake");
+  assert.deepEqual(environmentOverrides({ PI_JOURNAL_THINKING: "max" }), ["PI_JOURNAL_THINKING"]);
+  const cleared = await loadSettings({ filePath, env: { PI_JOURNAL_THINKING: "default" }, home: root });
+  assert.equal(cleared.thinkingLevel, undefined);
+  assert.equal((await loadSettings({ filePath, env: {}, home: root })).thinkingLevel, "max");
+  await saveSettings({ ...required, thinkingLevel: " DEFAULT " }, filePath);
+  assert.doesNotMatch(await readFile(filePath, "utf8"), /thinkingLevel/);
+  for (const invalid of ["", "ultra", "max\nhigh", null, true, 0, {}]) {
+    assert.throws(() => validateSettings({ ...required, thinkingLevel: invalid }), /thinkingLevel/);
   }
 });
 

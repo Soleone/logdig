@@ -3,6 +3,7 @@ import { JOURNAL_SYSTEM_PROMPT, summaryCachePolicy } from "./journal.js";
 import { spawnPiProcess } from "./pi-process.js";
 
 const MODEL_TIMEOUT_MS = 5 * 60 * 1000;
+const THINKING_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_STDOUT = 2_000_000;
 const MAX_STDERR = 16_000;
 
@@ -24,6 +25,7 @@ function piArguments(settings) {
     JOURNAL_SYSTEM_PROMPT,
   ];
   if (settings.model) args.push("--model", settings.model);
+  if (settings.thinkingLevel !== undefined) args.push("--thinking", settings.thinkingLevel);
   args.push("--", "Use the journal request and evidence supplied on standard input. Return the requested JSON only.");
   return args;
 }
@@ -52,10 +54,11 @@ function runPiPrompt(prompt, settings, spawnProcess) {
       else resolve(result);
     };
 
+    const timeoutMs = settings.thinkingLevel && settings.thinkingLevel !== "off" ? THINKING_TIMEOUT_MS : MODEL_TIMEOUT_MS;
     const timeout = setTimeout(() => {
       child.kill("SIGTERM");
-      finish(new Error(`Pi summarization timed out after ${MODEL_TIMEOUT_MS / 1000} seconds`));
-    }, MODEL_TIMEOUT_MS);
+      finish(new Error(`Pi summarization timed out after ${timeoutMs / 1000} seconds`));
+    }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
       outputLength += chunk.length;
