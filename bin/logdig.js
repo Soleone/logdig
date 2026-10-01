@@ -9,7 +9,8 @@ import { spawnPiProcess } from "../src/pi-process.js";
 import { environmentOverrides, loadSettings, validateSettings } from "../src/settings.js";
 import { checkDirectory } from "../src/directories.js";
 import { configureLogDig } from "../src/setup.js";
-import { progressStatus, statusPrefix, statusPrefixWidth } from "../src/cli-status.js";
+import { statusPrefix, statusPrefixWidth } from "../src/cli-status.js";
+import { createBackfillProgress } from "../src/backfill-progress.js";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const relativeEntry = path.relative(process.cwd(), fileURLToPath(import.meta.url)).split(path.sep).join("/");
@@ -194,32 +195,24 @@ async function backfill(args) {
   console.log("One result per work period; resumed sessions may have multiple dated rows.");
   if (!dryRun) console.log("Summarizing new or changed work may take a few minutes; a slow session can delay later rows.");
   console.log();
-  const progress = found.sessions.map(() => ({ lines: [], complete: false }));
-  let nextResult = 0;
-  const modelClient = createPiModelClient(generationSettings);
-  const result = await writeSessions(modelClient, found.sessions, settings, {
-    ...found,
-    dryRun,
-    onProgress: ({ index, total, sessionId, project, date, time, status, error, reason, sessionPath, dailyPath, prerequisite, phase }) => {
-      if (!["complete", "skipped", "error"].includes(phase)) return;
-      const position = `${String(index).padStart(String(total).length, "0")}/${total}`;
-      const timestamp = `${date || ""}${time ? ` ${time}` : ""}`.padEnd(16);
-      const detail = error || reason;
-      const { lines } = progress[index - 1];
-      lines.push(`[${position}] ${timestamp} · ${progressStatus(status, { pad: true })} · ${project || "session"} (${sessionId.slice(-8)})${prerequisite ? " · prerequisite" : ""}${detail ? `: ${detail}` : ""}`);
-      if (dryRun && dailyPath) {
-        lines.push(`  Daily note: ${dailyPath}`, `  Full summary: ${sessionPath}`);
-        if (prerequisite) lines.push("  Includes this earlier block to establish the continuation link.");
-      }
-    },
-    onSessionComplete: ({ index }) => {
-      progress[index - 1].complete = true;
-      while (progress[nextResult]?.complete) {
-        for (const line of progress[nextResult].lines) console.log(line);
-        nextResult++;
-      }
-    },
-  });
+  const progress = createBackfillProgress({ total: found.sessions.length, concurrency: settings.concurrency, dryRun });
+  const interrupt = () => { cleanupProgress(); process.kill(process.pid, "SIGINT"); };
+  const terminate = () => { cleanupProgress(); process.kill(process.pid, "SIGTERM"); };
+  function cleanupProgress() {
+    progress.close();
+    process.removeListener("SIGINT", interrupt);
+    process.removeListener("SIGTERM", terminate);
+  }
+  process.once("SIGINT", interrupt);
+  process.once("SIGTERM", terminate);
+  let result;
+  try {
+    result = await writeSessions(createPiModelClient(generationSettings), found.sessions, settings, {
+      ...found, dryRun, onProgress: progress.onProgress, onSessionComplete: progress.onSessionComplete,
+    });
+  } finally {
+    cleanupProgress();
+  }
   const summaryCount = `${result.summariesCreated} ${result.summariesCreated === 1 ? "summary" : "summaries"}`;
   const entryCount = `${result.entriesAppended} daily ${result.entriesAppended === 1 ? "entry" : "entries"}`;
   const updateCount = `${result.entriesUpdated} ${result.entriesUpdated === 1 ? "entry" : "entries"}`;

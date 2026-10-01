@@ -29,7 +29,7 @@ test("padded progress statuses align with and without terminal icons and color",
     { isTTY: false }, { isTTY: true, term: "xterm" },
     { isTTY: true, term: "xterm", noColor: true }, { isTTY: true, icons: false },
   ]) {
-    const statuses = ["CHECKING", "SUMMARIZING", "SAVED", "UPDATED", "CURRENT", "SKIPPED", "FAILED", "PREVIEW"];
+    const statuses = ["CHECKING", "SUMMARIZING", "SAVED", "UPDATED", "CURRENT", "DONE", "SKIPPED", "FAILED", "PREVIEW"];
     const rendered = statuses.map((status) => progressStatus(status, { ...options, pad: true }).replace(/\u001b\[[0-9;]*m/g, ""));
     assert.equal(new Set(rendered.map((text) => text.length)).size, 1);
     for (const [index, status] of statuses.entries()) assert.ok(rendered[index].endsWith(status.padEnd(11)));

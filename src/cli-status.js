@@ -13,6 +13,7 @@ const progressStatuses = {
   SAVED: { icon: "\uf00c", color: "32" },
   UPDATED: { icon: "\uf040", color: "36" },
   CURRENT: { icon: "\uf058", color: "32" },
+  DONE: { icon: "\uf00c", color: "32" },
   SKIPPED: { icon: "\uf05e", color: "33" },
   FAILED: { icon: "\uf00d", color: "31" },
   PREVIEW: { icon: "\uf06e", color: "36" },

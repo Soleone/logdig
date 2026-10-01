@@ -382,7 +382,8 @@ test("real CLI backfill preserves handwritten notes, gives progress, and repeats
   const first = await runCli(["backfill", "1"], w.env);
   assert.equal(first.code, 0, first.stderr);
   assert.match(first.stdout, /\[1\/1\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} · SAVED {6} · demo-project \(-session\)/);
-  assert.doesNotMatch(first.stdout, /SUMMARIZING|CHECKING|block 1\/1/);
+  assert.match(first.stdout, /^Active \[1\/1\].*SUMMARIZING/m);
+  assert.doesNotMatch(first.stdout, /CHECKING|block 1\/1|\x1b/);
   assert.match(first.stdout, /Checked: 1 work block across 1 session\./);
   assert.match(first.stdout, /a slow session can delay later rows/);
   assert.match(first.stdout, /Saved: 1 summary created/);
@@ -444,7 +445,8 @@ test("parallel CLI progress identifies same-time sessions and continuation block
   const lines = first.stdout.split("\n").filter((line) => /^\[\d+\/\d+\]/.test(line));
   assert.equal(lines.length, 4);
   assert.deepEqual(lines.map((line) => line.slice(0, 5)), ["[1/2]", "[1/2]", "[2/2]", "[2/2]"]);
-  assert.doesNotMatch(first.stdout, /block \d+\/\d+|SUMMARIZING|CHECKING/);
+  assert.doesNotMatch(first.stdout, /block \d+\/\d+|CHECKING|\x1b/);
+  assert.equal(first.stdout.split("\n").filter((line) => line.startsWith("Active ")).length, 4);
   for (const [index, id] of [[1, "11111111"], [2, "22222222"]]) {
     const sessionLines = lines.filter((line) => line.startsWith(`[${index}/2]`));
     assert.equal(sessionLines.length, 2);
@@ -484,6 +486,28 @@ test("CLI results stay ordered and columns aligned when later sessions finish fi
   assert.equal(new Set(lines.map((line) => line.lastIndexOf(" · "))).size, 1);
   assert.match(lines.at(-1), /SKIPPED {4} · session \(dered-12\): no journalable events$/);
   assert.equal((await calls(w.callsPath)).length, 11);
+});
+
+test("redirected CLI reports active summarization before the model finishes", async (t) => {
+  const w = await workspace(t);
+  await addSession(w.settings);
+  const sessionPath = path.join(w.settings.sessionDirectory, "demo-session.jsonl");
+  await writeFile(sessionPath, (await readFile(sessionPath, "utf8")).replace("Make this nicer.", "Wait for later sessions."));
+  const gate = path.join(w.root, "release-model");
+  let release;
+  const result = await runCli(["backfill", "all"], { ...w.env, LOGDIG_TEST_ORDERING_GATE: gate }, {
+    onOutput: (stdout) => {
+      if (release || !stdout.includes("Active [1/1]")) return;
+      assert.match(stdout, /SUMMARIZING/);
+      assert.doesNotMatch(stdout, / · SAVED/);
+      release = writeFile(gate, "released after progress");
+    },
+  });
+  assert.ok(release, "the live activity must be visible before the model can finish");
+  await release;
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Active \[1\/1\].*SUMMARIZING.*\n\[1\/1\].*SAVED/);
+  assert.doesNotMatch(result.stdout, /\x1b/);
 });
 
 test("CLI backfill updates an evolving session row and keeps a hand-edited blurb", async (t) => {
