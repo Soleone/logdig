@@ -33,6 +33,7 @@
     "src/",
     "README.md",
     "QUICKSTART.md",
+    "docs/usage.md",
     "LICENSE"
   ],
   "pi": {
@@ -42,6 +43,8 @@
   },
   "scripts": {
     "test": "node --test",
+    "demo": "node scripts/demo.js",
+    "demo:capture": "node scripts/capture-demo.js",
     "prepublishOnly": "npm test",
     "release": "release-it",
     "release:dry-run": "npm test && release-it --dry-run"

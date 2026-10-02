@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LogDig launch demo</title>
+<style>
+@font-face{font-family:Launch;src:url('./Lato-Bold.ttf') format('truetype');font-weight:700;font-display:block}
+@font-face{font-family:Launch;src:url('./Lato-Regular.ttf') format('truetype');font-weight:400;font-display:block}
+:root{--ink:#172f30;--mint:#d7efdf;--paper:#fafbf7;--muted:#506564;--line:#c7d6cd;--accent:#24654b}
+*{box-sizing:border-box}body{margin:0;background:var(--mint);color:var(--ink);font-family:Launch,Lato,sans-serif;font-weight:700}
+::selection{background:var(--ink);color:var(--mint)}
+.artboard{width:1600px;height:1000px;padding:56px 64px 36px;overflow:hidden;position:relative}
+header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:34px}
+.brand{font-size:32px;letter-spacing:-.03em}.site{font-size:20px}
+h1{font-size:76px;line-height:1.03;letter-spacing:-.035em;margin:0;max-width:1250px;text-wrap:balance}
+.subtitle{font-size:26px;line-height:1.45;margin:20px 0 32px;color:var(--muted)}
+.workspace{display:grid;grid-template-columns:790px 650px;gap:32px;height:530px}
+.terminal{background:#152b2b;color:#e2ede6;padding:24px 26px;overflow:hidden}
+.window-title{font-size:19px;margin:0 0 20px;color:#b8d7c5;display:flex;justify-content:space-between}
+.command{font-family:'DejaVu Sans Mono',monospace;font-size:18px;margin-bottom:22px;color:#fff}
+#terminal{font-family:'DejaVu Sans Mono',monospace;font-size:14px;line-height:1.85;white-space:pre;margin:0;font-weight:400;font-variant-numeric:tabular-nums}
+.active{color:#dcebb3}.saved{color:#9cddbb}.progress{color:#fff;font-weight:700}
+.note{background:var(--paper);padding:24px 32px;overflow:hidden;position:relative}
+.note-title{font-size:18px;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:18px}
+.note h2{font-size:25px;margin:22px 0 10px}.note h3{font-size:21px;margin:18px 0 9px}
+.note p{font-family:Launch,sans-serif;font-size:20px;line-height:1.4;font-weight:400;margin:0 0 12px}
+.note a{color:var(--accent);text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px;font-weight:700}
+.note a:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+#detail{display:none}.tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin:18px 0;padding-bottom:10px;color:var(--muted);font-size:18px}
+.tabs .selected{color:var(--accent)}
+footer{display:flex;justify-content:space-between;align-items:center;margin-top:24px;font-size:20px;color:var(--muted)}
+.provenance{font-family:Launch,sans-serif;font-size:16px;font-weight:400}.beat{color:var(--ink)}
+.timeline{position:absolute;left:0;bottom:0;height:3px;width:0;background:var(--accent)}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<main class="artboard">
+<header><div class="brand">LogDig</div><div class="site">github.com/Soleone/logdig</div></header>
+<h1>Your Pi history.<br>A journal you can read.</h1>
+<p class="subtitle">Backfill in parallel. Keep the short version. Open the details when you need them.</p>
+<div class="workspace">
+<section class="terminal" aria-label="Real backfill progress replay">
+<div class="window-title"><span>Backfill progress</span><span>4 parallel sessions</span></div>
+<div class="command">$ logdig backfill all</div>
+<pre id="terminal"></pre>
+</section>
+<section class="note" aria-label="Generated Markdown preview, not an Obsidian screenshot">
+<div class="note-title" id="note-title">Daily / 2026-10-01.md · Markdown excerpt</div>
+<div id="daily"></div>
+<div id="detail"></div>
+</section>
+</div>
+<footer><span class="beat" id="beat">Ten sessions. One place to remember them.</span><span class="provenance">Synthetic sessions + canned responses. Real backfill pipeline.</span></footer>
+<div class="timeline" id="timeline" aria-hidden="true"></div>
+</main>
+<script>
+const recording = /* RECORDING */ null;
+const terminal = document.getElementById('terminal');
+const daily = document.getElementById('daily');
+const detail = document.getElementById('detail');
+let playback;
+function escapeHtml(value){return String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;')}
+function markdown(value){
+  return value.replace(/^(#{1,3} .+)$/gm,'\n\n$1\n\n').split(/\n\s*\n/).filter(block=>block.trim()).map(block=>{
+    const heading=block.match(/^(#{1,3}) (.+)$/);
+    if(heading)return `<h${heading[1].length+1}>${escapeHtml(heading[2])}</h${heading[1].length+1}>`;
+    const text=escapeHtml(block).replace(/\*\*\[\[([^|]+)\|([^\]]+)\]\]\*\*/g,'<a href="#detail" data-entry="$1">$2</a>').replaceAll('\n','<br>');
+    return `<p>${text}</p>`;
+  }).join('');
+}
+function renderAt(ms){
+  if(!recording)return;
+  const frame=recording.frames.findLast(frame=>frame.ms<=ms)||recording.frames[0];
+  // Crop the permanent results once they grow; preserve the complete live panel.
+  const lines=frame.lines.filter((line,index,all)=>line||index<all.length-1).slice(-17);
+  terminal.innerHTML=lines.map(line=>`<span class="${line.includes('SUMMARIZING')?'active':line.includes('SAVED')?'saved':line.startsWith('Progress:')?'progress':''}">${escapeHtml(line)}</span>`).join('\n');
+}
+function showDetail(level='medium'){
+  const entry=recording.summaries[0];
+  daily.style.display='none';detail.style.display='block';
+  document.getElementById('note-title').textContent=`LogDig / Entries · ${entry.project} / ${entry.time}`;
+  detail.innerHTML=`<h2>${escapeHtml(entry.project)} · ${escapeHtml(entry.time)}</h2><div class="tabs"><span class="${level==='small'?'selected':''}">Small</span><span class="${level==='medium'?'selected':''}">Medium</span><span class="${level==='large'?'selected':''}">Large</span></div>${markdown(entry.layers[level])}`;
+}
+function showDaily(){
+  daily.style.display='block';detail.style.display='none';
+  document.getElementById('note-title').textContent='Daily / 2026-10-01.md · Markdown excerpt';
+}
+window.seek=(seconds)=>{
+  clearInterval(playback);
+  showDaily();renderAt(Math.min(seconds*1000,recording.durationMs));
+  document.getElementById('timeline').style.width='0';
+};
+window.play=()=>{
+  clearInterval(playback);
+  const start=performance.now();
+  const intro=2500;const end=intro+recording.durationMs+6000;
+  window.demoDone=false;
+  playback=setInterval(()=>{
+    const elapsed=performance.now()-start;
+    renderAt(elapsed<intro?1500:Math.max(0,elapsed-intro));
+    document.getElementById('timeline').style.width=`${Math.min(100,elapsed/end*100)}%`;
+    if(elapsed<intro){showDaily();document.getElementById('beat').textContent='Ten sessions. One place to remember them.'}
+    else if(elapsed<intro+recording.durationMs){showDaily();document.getElementById('beat').textContent='Four sessions at once. Finished work keeps moving.'}
+    else if(elapsed<end-3000){showDetail('medium');document.getElementById('beat').textContent='Click a timestamp for the longer version.'}
+    else{showDetail('large');document.getElementById('beat').textContent='Try a safe preview: logdig backfill 1 --dry-run'}
+    if(elapsed>=end){clearInterval(playback);window.demoDone=true}
+  },50);
+};
+if(recording){
+  daily.innerHTML=markdown(recording.dailyMarkdown);
+  daily.addEventListener('click',event=>{if(event.target.closest('a')){event.preventDefault();showDetail()}});
+  renderAt(1500);
+}
+</script>
+</body>
+</html>

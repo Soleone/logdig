@@ -32,13 +32,13 @@ test("npm tarball installs a working PATH command without runtime dependencies",
   assert.equal(manifest.private, undefined);
   assert.equal(manifest.license, "MIT");
   assert.deepEqual(manifest.dependencies ?? {}, {});
-  for (const filePath of ["package.json", "README.md", "QUICKSTART.md", "LICENSE", "bin/logdig.js", ...manifest.pi.extensions]) {
+  for (const filePath of ["package.json", "README.md", "QUICKSTART.md", "docs/usage.md", "LICENSE", "bin/logdig.js", ...manifest.pi.extensions]) {
     assert.ok(files.includes(filePath.replace(/^\.\//, "")), `Missing ${filePath}`);
   }
   for (const filePath of await readdir(path.join(packageRoot, "src"))) {
     assert.ok(files.includes(`src/${filePath}`), `Missing src/${filePath}`);
   }
-  assert.ok(files.every((filePath) => /^(bin\/|src\/|package\.json$|README\.md$|QUICKSTART\.md$|LICENSE$)/.test(filePath)), "Unexpected files in npm package");
+  assert.ok(files.every((filePath) => /^(bin\/|src\/|docs\/usage\.md$|package\.json$|README\.md$|QUICKSTART\.md$|LICENSE$)/.test(filePath)), "Unexpected files in npm package");
   assert.equal(packed.bundled.length, 0);
 
   const prefix = path.join(root, "global");

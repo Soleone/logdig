@@ -4,14 +4,14 @@ A small work journal in your existing Obsidian daily notes. Start manually, with
 
 ## 1. Install and configure
 
-With Node.js 22.19+ and Pi installed (once the first npm release is published):
+With Node.js 22.19+ and Pi installed:
 
 ```sh
 npm install -g logdig
 logdig init
 ```
 
-Before the first release, run `npm link` from this project folder instead. No build step is needed. To work directly from the checkout without installing, replace `logdig` below with `node ./bin/logdig.js`.
+From a source checkout, run `npm link` from this project folder instead. No build step is needed. To work directly from the checkout without installing, replace `logdig` below with `node ./bin/logdig.js`.
 
 In the wizard:
 
@@ -99,4 +99,4 @@ npm install -g logdig@latest
 logdig --version
 ```
 
-For more commands, privacy details, and troubleshooting, see [README.md](README.md).
+For more commands, privacy details, and troubleshooting, see [the full reference](docs/usage.md).
