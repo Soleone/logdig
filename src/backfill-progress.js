@@ -42,7 +42,7 @@ export function createBackfillProgress({ total, concurrency, dryRun = false, str
   function sessionLabel(event, status = event.status, elapsed = "") {
     const position = `${String(event.index).padStart(String(total).length, "0")}/${total}`;
     const timestamp = `${cleanText(event.date)}${event.time ? ` ${cleanText(event.time)}` : ""}`.padEnd(16);
-    return `[${position}] ${timestamp} · ${progressStatus(status, statusOptions)} · ${elapsed ? `${elapsed} · ` : ""}${cleanText(event.project) || "session"} (${cleanText(event.sessionId).slice(-8)})`;
+    return `[${position}] ${timestamp} · ${progressStatus(status, statusOptions)} · ${cleanText(event.project) || "session"} (${cleanText(event.sessionId).slice(-8)})${elapsed ? ` · ${elapsed}` : ""}`;
   }
 
   function renderPanel() {

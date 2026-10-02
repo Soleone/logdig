@@ -55,8 +55,8 @@ test("live panel separates active workers from finished sessions waiting to prin
   progress.onProgress(event(2));
   assert.match(stream.screen(), /Progress: 0\/2 complete · 2 active · 0 queued/);
   assert.match(stream.screen(), /Active sessions \(stage elapsed\):/);
-  assert.match(stream.screen(), /SUMMARIZING · 0s · project-1/);
-  assert.match(stream.screen(), /SUMMARIZING · 0s · project-2/);
+  assert.match(stream.screen(), /SUMMARIZING · project-1 \(ession-1\) · 0s/);
+  assert.match(stream.screen(), /SUMMARIZING · project-2 \(ession-2\) · 0s/);
   progress.onProgress(event(2, "UPDATED"));
   progress.onSessionComplete({ index: 2 });
   assert.match(stream.screen(), /Progress: 1\/2 complete · 1 active · 0 queued/);
@@ -81,7 +81,7 @@ test("panel shows queued work and no buffered result rows", () => {
   const lines = stream.screen().split("\n");
   assert.equal(lines.length, 6);
   assert.match(lines[0], /Progress: 4\/8 complete · 3 active · 1 queued/);
-  for (const index of [1, 6, 7]) assert.ok(lines.some((line) => line.includes(`SUMMARIZING · 0s · project-${index}`)));
+  for (const index of [1, 6, 7]) assert.ok(lines.some((line) => line.includes(`SUMMARIZING · project-${index} (ession-${index}) · 0s`)));
   assert.match(lines.at(-1), /4 finished sessions waiting to print after #1\./);
   assert.doesNotMatch(stream.screen(), /DONE|project-[2-5]/);
   progress.close();
@@ -111,20 +111,35 @@ test("elapsed times refresh while the model is silent, reset for a new stage, an
   const { stream, progress } = fixture();
   progress.onProgress(event(1, "CHECKING", { phase: "checking" }));
   t.mock.timers.tick(2000);
-  assert.match(stream.screen(), /CHECKING\s+· 2s · project-1/);
+  assert.match(stream.screen(), /CHECKING\s+· project-1 \(ession-1\) · 2s/);
   progress.onProgress(event(1));
-  assert.match(stream.screen(), /SUMMARIZING · 0s · project-1/);
+  assert.match(stream.screen(), /SUMMARIZING · project-1 \(ession-1\) · 0s/);
   t.mock.timers.tick(62000);
-  assert.match(stream.screen(), /SUMMARIZING · 1m 2s · project-1/);
+  assert.match(stream.screen(), /SUMMARIZING · project-1 \(ession-1\) · 1m 2s/);
   progress.onProgress(event(1));
-  assert.match(stream.screen(), /SUMMARIZING · 1m 2s · project-1/);
+  assert.match(stream.screen(), /SUMMARIZING · project-1 \(ession-1\) · 1m 2s/);
   progress.onProgress(event(1, "SUMMARIZING", { blockId: "next-block" }));
-  assert.match(stream.screen(), /SUMMARIZING · 0s · project-1/);
+  assert.match(stream.screen(), /SUMMARIZING · project-1 \(ession-1\) · 0s/);
   progress.close();
   const output = stream.output;
   t.mock.timers.tick(5000);
   assert.equal(stream.output, output);
   assert.equal(stream.screen(), "");
+});
+
+test("mixed second and minute timers appear after consistently aligned session titles", (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: 1000 });
+  const { stream, progress } = fixture();
+  progress.onProgress(event(1));
+  t.mock.timers.tick(59000);
+  progress.onProgress(event(2));
+  t.mock.timers.tick(2000);
+
+  const rows = stream.screen().split("\n").filter((line) => line.includes("project-"));
+  assert.match(rows[0], /project-1 \(ession-1\) · 1m 1s$/);
+  assert.match(rows[1], /project-2 \(ession-2\) · 2s$/);
+  assert.equal(rows[0].indexOf("project-1"), rows[1].indexOf("project-2"));
+  progress.close();
 });
 
 test("finishing all sessions stops timed redraws before close", (t) => {
