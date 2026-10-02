@@ -112,7 +112,7 @@ function runPiPrompt(prompt, settings, spawnProcess) {
         return;
       }
       const text = (finalMessage.content || []).filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
-      finish(undefined, { text, usages });
+      finish(undefined, { text, usages, provider: finalMessage.provider, model: finalMessage.model });
     });
     child.stdin.once("error", (error) => {
       if (error.code !== "EPIPE") finish(error);

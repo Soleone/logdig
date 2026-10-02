@@ -7,7 +7,7 @@ import { createPiModelClient } from "../src/pi-client.js";
 function jsonOutput(text, usage = { input: 12, output: 4, cacheRead: 60, cacheWrite: 0, cost: { total: 0.01 } }, stopReason = "stop") {
   return [
     { type: "session", id: "test" },
-    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text }], usage, stopReason } },
+    { type: "message_end", message: { role: "assistant", provider: "test-provider", model: "test-model", content: [{ type: "text", text }], usage, stopReason } },
     { type: "agent_settled" },
   ].map((event) => JSON.stringify(event)).join("\n") + "\n";
 }
@@ -48,6 +48,8 @@ test("Pi client makes a one-shot, no-tools, no-session request and honors model 
 
   assert.equal(result.text, '{"small":"done"}');
   assert.equal(result.usages.length, 1);
+  assert.equal(result.provider, "test-provider");
+  assert.equal(result.model, "test-model");
   assert.equal(result.usages[0].cacheRead, 60);
   assert.equal(launch.command, "pi-test");
   assert.deepEqual(launch.args.slice(0, 2), ["--mode", "json"]);

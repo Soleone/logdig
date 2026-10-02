@@ -303,7 +303,7 @@ test("legacy overnight rows migrate to the starting day, preserving snapshots an
   const legacyPath = path.join(f.settings.cacheDirectory, "Sessions", "multi-day.md");
   await mkdir(path.dirname(legacyPath), { recursive: true });
   const legacy = renderSessionNote({ ...f.session, date: "2026-10-01", time: "02:00", timezone: "UTC", project: "demo", sourceFingerprint: "old-raw-hash" }, legacySummary, "old-cache", "test/fake")
-    .replace('summaryVersion: "work-block-layers-v1"', 'summaryVersion: "session-layers-v2"');
+    .replace('summaryVersion: "work-block-layers-v2"', 'summaryVersion: "session-layers-v2"');
   await writeFile(legacyPath, legacy);
   const old = await appendDailyEntry(f.settings.dailyDirectory, f.settings.dailyHeader, {
     date: "2026-10-01", time: "02:00", sessionId: f.session.header.id, project: "demo", cacheFingerprint: "old-cache", summaryLevel: "small", summary: legacySummary.small, sessionPath: legacyPath,
