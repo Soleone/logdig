@@ -42,7 +42,7 @@ export function createBackfillProgress({ total, concurrency, dryRun = false, str
   function sessionLabel(event, status = event.status, elapsed = "") {
     const position = `${String(event.index).padStart(String(total).length, "0")}/${total}`;
     const timestamp = `${cleanText(event.date)}${event.time ? ` ${cleanText(event.time)}` : ""}`.padEnd(16);
-    return `[${position}] ${timestamp} · ${progressStatus(status, statusOptions)} · ${cleanText(event.project) || "session"} (${cleanText(event.sessionId).slice(-8)})${elapsed ? ` · ${elapsed}` : ""}`;
+    return `[${position}] ${timestamp} · ${progressStatus(status, statusOptions)} · ${elapsed ? `${elapsed} · ` : ""}${cleanText(event.project) || "session"} (${cleanText(event.sessionId).slice(-8)})`;
   }
 
   function renderPanel() {
@@ -68,7 +68,7 @@ export function createBackfillProgress({ total, concurrency, dryRun = false, str
       lines.push(`Active sessions (stage elapsed${hidden ? `; ${hidden} not shown` : ""}):`);
       for (const session of active.slice(0, capacity)) {
         const seconds = Math.max(0, Math.floor((Date.now() - session.stageStartedAt) / 1000));
-        const elapsed = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+        const elapsed = `${String(Math.floor(seconds / 60)).padStart(2, "0")}m ${String(seconds % 60).padStart(2, "0")}s`;
         lines.push(sessionLabel(session.event, session.event.status, elapsed));
       }
     }
