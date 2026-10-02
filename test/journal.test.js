@@ -32,7 +32,7 @@ test("session cache stores all three layers and round-trips its metadata", () =>
   assert.equal(parsed.model, "test/fake");
   assert.equal(parsed.sourceFingerprint, "source-123");
   assert.equal(parsed.cacheFingerprint, "cache-123");
-  assert.equal(parsed.summaryVersion, "work-block-layers-v2");
+  assert.equal(parsed.summaryVersion, "work-block-layers-v3");
   assert.deepEqual(parsed.summary, summary);
   assert.match(markdown, /^# Small/m);
   assert.match(markdown, /^# Medium/m);
@@ -118,13 +118,15 @@ test("large session evidence is summarized in bounded chunks before final layers
   assert.equal(parseSessionNote(await readFile(result.sessionPath, "utf8")).logUsage, note.logUsage);
 });
 
-test("final prompt supplies current-block dates without importing background dates", async () => {
+test("final prompt requests a first-person diary and current-block dates without importing background dates", async () => {
   let prompt;
   await summarizeSession({ complete: async (value) => { prompt = value; return JSON.stringify(summary); } }, {
     ...session,
     context: [{ date: "2026-09-25", text: "Earlier implementation and checks." }],
     events: [{ date: "2026-09-27", time: "10:25", project: "demo", sessionId: "01-session", kind: "assistant outcome", text: "Checks reported passing." }],
   });
+  assert.match(prompt, /all three layers as the user's personal diary: use 'I', never 'the user'/);
+  assert.match(prompt, /use 'we' only when it clarifies collaboration with the agent/);
   assert.match(prompt, /Known local work-block dates: 2026-09-27\./);
   assert.doesNotMatch(prompt, /Known local work-block dates:.*2026-09-25/);
   assert.match(prompt, /completed commits versus edits still awaiting commit/);
@@ -149,6 +151,8 @@ test("chunked prompts preserve date changes even if the model digest loses dates
     assert.match(prompt, /Retain the source date on each bullet/);
     assert.match(prompt, /completed commits versus edits awaiting commit/);
   }
+  assert.match(prompts.at(-1), /all three layers as the user's personal diary: use 'I', never 'the user'/);
+  assert.match(prompts.at(-1), /use 'we' only when it clarifies collaboration with the agent/);
   assert.match(prompts.at(-1), /Known local work-block dates: 2026-09-27, 2026-09-28\./);
   assert.match(prompts.at(-1), /attached to the action or result they record/);
 });
@@ -159,11 +163,11 @@ test("prompt-version changes invalidate old summaries without changing source id
   const client = { cachePolicy: { model: "Pi default" }, complete: async () => JSON.stringify(summary) };
   const current = await saveSessionSummary(client, root, session);
   const oldFingerprint = createHash("sha256").update(JSON.stringify([
-    "work-block-layers-v1", JOURNAL_SYSTEM_PROMPT, 16000, current.sourceFingerprint, [["model", "Pi default"]],
+    "work-block-layers-v2", JOURNAL_SYSTEM_PROMPT, 16000, current.sourceFingerprint, [["model", "Pi default"]],
   ])).digest("hex");
   const markdown = (await readFile(current.sessionPath, "utf8"))
     .replace(`cacheFingerprint: "${current.cacheFingerprint}"`, `cacheFingerprint: "${oldFingerprint}"`)
-    .replace('summaryVersion: "work-block-layers-v2"', 'summaryVersion: "work-block-layers-v1"');
+    .replace('summaryVersion: "work-block-layers-v3"', 'summaryVersion: "work-block-layers-v2"');
   await writeFile(current.sessionPath, markdown);
   const inspected = await inspectSessionSummary(client, root, session);
   assert.equal(inspected.reused, false);

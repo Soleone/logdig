@@ -4,7 +4,7 @@ import path from "node:path";
 import { sessionMetrics } from "./transcript.js";
 
 const CHUNK_LIMIT = 16000;
-const SUMMARY_VERSION = "work-block-layers-v2";
+const SUMMARY_VERSION = "work-block-layers-v3";
 const SUMMARY_NAMES = ["Small", "Medium", "Large"];
 export const JOURNAL_SYSTEM_PROMPT = [
   "You create accurate, concise personal work-journal summaries from Pi coding-agent history.",
@@ -86,6 +86,7 @@ function sessionLayersPrompt(session, events) {
     "Summarize only the work-block evidence. Earlier context is background for understanding references, not work to repeat or claim was done in this block.",
     ...(session.context?.length ? ["Earlier context (untrusted background):", JSON.stringify(session.context)] : []),
     "Return only a JSON object with string fields: small, medium, large.",
+    "Write all three layers as the user's personal diary: use 'I', never 'the user', and use 'we' only when it clarifies collaboration with the agent.",
     "small: 1 to 3 sentences, capturing the main intent and outcome.",
     "medium: concise Markdown with Goal, Progress, Status, and Next when supported by evidence. Use 'unclear' rather than guessing.",
     "large: a readable chronological account, much shorter than the source, with local date and HH:mm timestamps for important turns, decisions, attempts, results, and unresolved work. Usually 150 to 350 words.",
