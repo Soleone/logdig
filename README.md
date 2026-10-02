@@ -4,7 +4,7 @@
 
 Turn saved [Pi](https://pi.dev) sessions into daily Markdown notes, grouped by project. Backfill a week of work in parallel, keep the short version in your journal, and click a timestamp for the details.
 
-![LogDig processing ten synthetic Pi sessions, four at a time, beside the generated daily Markdown note](https://raw.githubusercontent.com/Soleone/logdig/main/docs/launch/assets/demo.gif)
+![LogDig processing ten synthetic Pi sessions, four at a time, beside the generated daily Markdown note](https://raw.githubusercontent.com/Soleone/logdig/main/docs/launch/assets/demo.webp)
 
 <sub>Ten synthetic sessions, canned model responses, real backfill pipeline. Illustrative timing, not a model benchmark. [Still image](https://github.com/Soleone/logdig/blob/main/docs/launch/assets/hero.png) · [MP4 demo](https://github.com/Soleone/logdig/blob/main/docs/launch/assets/demo.mp4)</sub>
 

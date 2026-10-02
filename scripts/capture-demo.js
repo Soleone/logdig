@@ -8,7 +8,7 @@ import { createDemo } from "./demo.js";
 const exec = promisify(execFile);
 const outputDirectory = process.argv[2];
 if (process.argv.includes("--help")) {
-  console.log("node scripts/capture-demo.js [NEW_OUTPUT_DIRECTORY]\nRequires agent-browser with its Linux browser installed, plus FFmpeg. Outputs hero.png, demo.mp4, demo.gif and editable replay. Never calls a provider.");
+  console.log("node scripts/capture-demo.js [NEW_OUTPUT_DIRECTORY]\nRequires agent-browser with its Linux browser installed, plus FFmpeg. Outputs hero.png, demo.mp4, demo.webp, demo.gif and editable replay. Never calls a provider.");
 } else {
   capture().catch((error) => { console.error(error.message); process.exitCode = 1; });
 }
@@ -37,10 +37,11 @@ async function capture() {
   const encode = (args) => exec("ffmpeg", ["-hide_banner", "-loglevel", "error", ...args], { timeout: 120_000, maxBuffer: 1024 * 1024 });
   await encode(["-i", path.join(assets, "demo.webm"), "-an", "-vf", "fps=30", "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", path.join(assets, "demo.mp4")]);
   await encode(["-i", path.join(assets, "demo.mp4"), "-filter_complex", "[0:v]fps=8,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3", "-loop", "0", path.join(assets, "demo.gif")]);
+  await encode(["-i", path.join(assets, "demo.mp4"), "-vf", "fps=8,scale=960:-1:flags=lanczos", "-c:v", "libwebp_anim", "-quality", "85", "-compression_level", "6", "-loop", "0", "-an", path.join(assets, "demo.webp")]);
   await writeFile(path.join(root, "manifest.json"), JSON.stringify({
     synthetic: true, dimensions: [1600, 1000], intendedDurationMs: recording.durationMs + 8500,
     source: "index.html + recording.json; docs/launch/artboard.html; scripts/demo.js",
-    outputs: ["assets/hero.png", "assets/demo.mp4", "assets/demo.gif"],
+    outputs: ["assets/hero.png", "assets/demo.mp4", "assets/demo.webp", "assets/demo.gif"],
     provenance: "Real LogDig pipeline and progress renderer; ten authored synthetic sessions; deterministic canned summaries and delays. Markdown preview, not an Obsidian screenshot. No audio, private history or provider calls. Lato fonts: SIL OFL, see Lato-LICENSE.txt.",
     verification: recording.verification, review: "Exports require visual review before publication. Timing is illustrative, not a model benchmark.",
   }, null, 2) + "\n");

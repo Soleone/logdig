@@ -4,7 +4,7 @@
 
 Lead with recovering Pi history, not installing another integration. Show the result immediately, with parallel backfill as the mechanism. Obsidian is the original home, not a requirement.
 
-Use **the MP4 on X**, **the PNG in Discord**, and **the lightweight GIF at the top of the GitHub README**. The silent demo works without sound. No separate website or cinematic trailer is needed for this first reveal.
+Use **the MP4 on X**, **the PNG in Discord**, and **the lightweight animated WebP at the top of the GitHub README**. The silent demo works without sound. No separate website or cinematic trailer is needed for this first reveal.
 
 ### X: two sentences
 
@@ -28,7 +28,8 @@ Attach `assets/hero.png`. Use the server's showcase/self-promotion channel and c
 | --- | --- | --- |
 | [assets/hero.png](assets/hero.png) | Discord, static fallback | 1600 × 1000, PNG, about 167 KB |
 | [assets/demo.mp4](assets/demo.mp4) | X upload, downloadable demo | 1600 × 1000, about 18 seconds, H.264, 30 fps, yuv420p, no audio, about 755 KB |
-| [assets/demo.gif](assets/demo.gif) | GitHub README | 960 × 600, 8 fps, looping, about 1.3 MB |
+| [assets/demo.webp](assets/demo.webp) | GitHub README | 960 × 600, 8 fps, looping, quality 85, about 774 KB |
+| [assets/demo.gif](assets/demo.gif) | Compatibility fallback | 960 × 600, 8 fps, looping, about 1.3 MB |
 
 ### Provenance and limits
 
@@ -58,14 +59,14 @@ npm run demo:capture
 npm run demo:capture -- /tmp/logdig-reveal-new-take
 ```
 
-The command uses its own isolated browser session, waits for local fonts, captures the still, records the replay, exports MP4/GIF, and closes the browser. Output remains outside the repository unless explicitly chosen otherwise. Inspect the actual exports before replacing committed assets:
+The command uses its own isolated browser session, waits for local fonts, captures the still, records the replay, exports MP4/WebP/GIF, and closes the browser. Output remains outside the repository unless explicitly chosen otherwise. Inspect the actual exports before replacing committed assets:
 
 ```sh
 ffprobe -v error -show_entries format=duration,size:stream=codec_name,width,height,r_frame_rate,pix_fmt \
   -of json /tmp/logdig-reveal-new-take/assets/demo.mp4
 ```
 
-Copy only `hero.png`, `demo.mp4`, and `demo.gif` into `docs/launch/assets/` after review. Generated recordings carry local absolute paths; they should not be added to the public repo. The capture creates `manifest.json` with provenance and verification results.
+Copy only `hero.png`, `demo.mp4`, `demo.webp`, and `demo.gif` into `docs/launch/assets/` after review. Generated recordings carry local absolute paths; they should not be added to the public repo. The capture creates `manifest.json` with provenance and verification results.
 
 ### Why not Remotion yet?
 
@@ -78,7 +79,7 @@ For this reveal, the smallest credible route is **real pipeline → recorded ter
 - Commit and push the README, full reference and assets to `main`. README media URLs will not resolve until those files exist on GitHub.
 - Verify the repo is public and the media loads on GitHub, including on a phone. If the repo's default branch changes, update the absolute media URLs.
 - Check the npm version and do a clean install/preview outside the development checkout. Version `0.2.2` was confirmed published during this preparation.
-- Watch the MP4 at real speed and phone-sized, and inspect the GIF/still. Technical properties and representative first/middle/final frames were checked here; final editorial approval is yours.
+- Watch the MP4 at real speed and phone-sized, and inspect the animated WebP/still. Technical properties and representative first/middle/final frames were checked here; final editorial approval is yours.
 - Use only synthetic or explicitly reviewed data. Keep the synthetic-data disclosure in the media and README.
 - Post to X, then tailor the Discord message to each community. No posts, pushes, release or repository-setting changes are performed by this task.
 
