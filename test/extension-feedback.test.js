@@ -11,7 +11,7 @@ const response = { stopReason: "stop", content: [{ type: "text", text: JSON.stri
 async function extensionFixture(t, settingsPatch = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "logdig-extension-"));
   const settings = {
-    cacheDirectory: path.join(root, "cache"), dailyDirectory: path.join(root, "daily"), dailyHeader: "# Log", dailySummary: "small", timeZone: "UTC", sessionDirectory: path.join(root, "history"), autoCapture: false,
+    cacheDirectory: path.join(root, "cache"), dailyDirectory: path.join(root, "daily"), dailyHeader: "# Log", dailySummary: "small", timeZone: "UTC", sessionDirectory: path.join(root, "history"), claudeSessionDirectory: false, autoCapture: false,
     ...settingsPatch,
   };
   await mkdir(settings.sessionDirectory, { recursive: true });

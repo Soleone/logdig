@@ -141,7 +141,7 @@ test("settings reject invalid summary levels, headings, and model references", a
   try {
     await assert.rejects(saveSettings({ ...required, dailySummary: "tiny" }, filePath), /dailySummary/);
     await assert.rejects(saveSettings({ ...required, dailyHeader: "Log" }, filePath), /dailyHeader/);
-    await assert.rejects(saveSettings({ ...required, model: "gpt-4.1" }, filePath), /provider\/model/);
+    await assert.rejects(saveSettings({ ...required, summaryBackend: "pi", model: "gpt-4.1" }, filePath), /provider\/model/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

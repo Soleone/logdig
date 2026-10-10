@@ -4,8 +4,9 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { listJournaledSessions, summaryCachePolicy } from "../src/journal.js";
 import { collectSessions, parseBackfillArgument, writeSessions } from "../src/session-runner.js";
-import { createPiModelClient } from "../src/pi-client.js";
-import { spawnPiProcess } from "../src/pi-process.js";
+import { createSummaryClient, resolveSummaryBackend, summaryBackendFor } from "../src/summary-backends.js";
+import { claudeHistoryDirectory } from "../src/session-sources.js";
+import { spawnCommand } from "../src/command-process.js";
 import { environmentOverrides, loadSettings, validateSettings } from "../src/settings.js";
 import { checkDirectory } from "../src/directories.js";
 import { configureLogDig } from "../src/setup.js";
@@ -33,7 +34,7 @@ async function init() {
   const { settings, installExtension } = configured;
   if (installExtension) {
     try {
-      await runPiCommand(settings.piCommand, ["install", packageRoot], { inherit: true, timeoutMs: 120_000 });
+      await runCommand(settings.piCommand, ["install", packageRoot], { inherit: true, timeoutMs: 120_000 });
       console.log("Pi extension installed. Restart Pi or run /reload to load /journal.");
     } catch (error) {
       throw new Error(`Your settings are saved, but the extension could not be installed: ${error.message}. Run '${commandName} pi-install' when Pi is available.`);
@@ -44,9 +45,9 @@ async function init() {
   }
 }
 
-function runPiCommand(command, args, { cwd = process.cwd(), inherit = false, timeoutMs = 10_000 } = {}) {
+function runCommand(command, args, { cwd = process.cwd(), inherit = false, timeoutMs = 10_000 } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawnPiProcess(command, args, {
+    const child = spawnCommand(command, args, {
       cwd,
       stdio: inherit ? "inherit" : ["ignore", "pipe", "pipe"],
     });
@@ -84,15 +85,19 @@ async function showConfig() {
 
 async function doctor() {
   const settings = await loadSettings();
+  const backendName = await resolveSummaryBackend(settings);
+  const backend = summaryBackendFor({ summaryBackend: backendName });
+  const claudeDirectory = await claudeHistoryDirectory(settings);
   let issues = 0;
   let warnings = 0;
   const checks = [
     ["Session history", settings.sessionDirectory, false],
+    ...(claudeDirectory ? [["Claude Code history", claudeDirectory, false]] : []),
     ["Summary cache", settings.cacheDirectory, true],
     ["Daily notes", settings.dailyDirectory, true],
   ];
   const statusWidth = statusPrefixWidth();
-  const labelWidth = Math.max(...checks.map(([label]) => label.length), "Pi".length);
+  const labelWidth = Math.max(...checks.map(([label]) => label.length), backend.label.length, "Claude Code history".length);
   const valueColumn = statusWidth + labelWidth + 2;
   const formatLabel = (label, prefixWidth = statusWidth) => `${label}:${" ".repeat(valueColumn - prefixWidth - label.length - 1)}`;
 
@@ -110,8 +115,11 @@ async function doctor() {
       const result = await checkDirectory(directory, { writable, allowMissing: writable });
       console.log(`${statusPrefix("ok")}${formatLabel(label)}${directory}${result.exists ? "" : " (will be created on a real backfill)"}`);
     } catch (error) {
-      if (label === "Session history" && error.code === "ENOENT") {
-        console.warn(`${statusPrefix("warning")}${formatLabel(label)}${directory} (not found yet). Start a saved Pi session, or choose its location with '${commandName} init'.`);
+      if ((label === "Session history" || label === "Claude Code history") && error.code === "ENOENT") {
+        const hint = label === "Session history"
+          ? `Start a saved Pi session, or choose its location with '${commandName} init'.`
+          : `Check the folder with '${commandName} config', or set it to off.`;
+        console.warn(`${statusPrefix("warning")}${formatLabel(label)}${directory} (not found yet). ${hint}`);
         warnings++;
       } else {
         console.error(`${statusPrefix("error")}${formatLabel(label)}${directory} (${error.message}). Check folder permissions or choose another folder with '${commandName} init'.`);
@@ -120,17 +128,23 @@ async function doctor() {
     }
   }
 
+  if (!claudeDirectory && settings.claudeSessionDirectory !== false) {
+    console.log(`${statusPrefix("ok")}${formatLabel("Claude Code history")}none found, so skipped`);
+  } else if (settings.claudeSessionDirectory === false) {
+    console.log(`${statusPrefix("ok")}${formatLabel("Claude Code history")}off`);
+  }
   try {
-    const pi = await runPiCommand(settings.piCommand, ["--version", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--offline"]);
-    console.log(`${statusPrefix("ok")}${formatLabel("Pi")}${pi.stdout || pi.stderr || "available"}`);
+    const version = await runCommand(settings[backend.commandSetting], backend.versionArgs);
+    console.log(`${statusPrefix("ok")}${formatLabel(backend.label)}${version.stdout || version.stderr || "available"}`);
   } catch (error) {
-    console.error(`${statusPrefix("error")}${formatLabel("Pi")}${error.message}. Install Pi or set its executable in '${commandName} init' (advanced settings).`);
+    console.error(`${statusPrefix("error")}${formatLabel(backend.label)}${error.message}. Install ${backend.label} or set its executable in '${commandName} init' (advanced settings).`);
     issues++;
   }
-  console.log(`\nSummary model: ${settings.model || "Pi startup default"}`);
-  console.log(`Thinking: ${settings.thinkingLevel || "Pi startup default"}`);
+  console.log(`\nSummary backend: ${backendName}${settings.summaryBackend === "auto" ? " (auto)" : ""}`);
+  console.log(`Summary model: ${settings.model || backend.defaultModelLabel}`);
+  console.log(`Thinking: ${settings.thinkingLevel || backend.defaultModelLabel}`);
   console.log(`Parallel sessions: ${settings.concurrency}`);
-  console.log("Authentication is checked only when you request a summary. If it fails, open Pi and run /login.");
+  console.log(`Authentication is checked only when you request a summary. ${backend.authHint}`);
   if (issues) {
     console.error(`\n${issues} thing${issues === 1 ? "" : "s"} to fix. Address the FIX lines above, then run '${commandName} doctor' again.`);
     process.exitCode = 1;
@@ -141,9 +155,12 @@ async function doctor() {
 
 async function backfill(args) {
   const settings = await loadSettings();
+  const backendName = await resolveSummaryBackend(settings);
+  const backend = summaryBackendFor({ summaryBackend: backendName });
   let daysArgument;
   let dryRun = false;
   let skipToday = false;
+  let refresh = false;
   let selectedModel = settings.model;
   let selectedThinking = settings.thinkingLevel;
   for (let index = 0; index < args.length; index++) {
@@ -152,9 +169,11 @@ async function backfill(args) {
       dryRun = true;
     } else if (arg === "--skip-today") {
       skipToday = true;
+    } else if (arg === "--refresh") {
+      refresh = true;
     } else if (arg === "--model" || arg === "-m") {
       selectedModel = args[++index];
-      if (!selectedModel || selectedModel.startsWith("-")) throw new Error("--model requires provider/model, or 'default' to use Pi's startup model");
+      if (!selectedModel || selectedModel.startsWith("-")) throw new Error(`--model requires ${backend.modelHint}, or 'default' for ${backend.label}'s default model`);
     } else if (arg.startsWith("--model=")) {
       selectedModel = arg.slice("--model=".length);
     } else if (arg === "--thinking") {
@@ -169,7 +188,7 @@ async function backfill(args) {
     }
   }
   selectedModel = selectedModel?.trim().toLowerCase() === "default" ? undefined : selectedModel;
-  const generationSettings = validateSettings({ ...settings, model: selectedModel, thinkingLevel: selectedThinking });
+  const generationSettings = validateSettings({ ...settings, summaryBackend: backendName, model: selectedModel, thinkingLevel: selectedThinking });
   selectedModel = generationSettings.model;
   selectedThinking = generationSettings.thinkingLevel;
   const range = parseBackfillArgument(daysArgument);
@@ -178,17 +197,17 @@ async function backfill(args) {
   console.log(`${dryRun ? "Preview" : "Backfill"}: ${range.all ? "all saved sessions" : `last ${range.days}${skipToday ? " complete" : ""} day${range.days === 1 ? "" : "s"}`} (${settings.timeZone})${skipToday ? " · skipping today" : ""}`);
   console.log(`Daily notes: ${settings.dailyDirectory} (${settings.dailyHeader}, ${settings.dailySummary})`);
   console.log(`Summary cache: ${path.join(settings.cacheDirectory, "Sessions")}`);
-  console.log(`Model: ${selectedModel || "Pi startup default"}`);
-  console.log(`Thinking: ${selectedThinking || "Pi startup default"}`);
+  console.log(`Model: ${selectedModel || backend.defaultModelLabel}`);
+  console.log(`Thinking: ${selectedThinking || backend.defaultModelLabel}`);
   console.log(`Parallel sessions: ${settings.concurrency}`);
   console.log(dryRun
     ? "Dry run: no model requests, no file changes, and no folders created."
-    : "Only new or changed work blocks need summarizing. Selected, redacted history is sent to Pi's model; provider charges may apply.");
-  const found = await collectSessions({ sessionDirectory: settings.sessionDirectory, timeZone: settings.timeZone, days: range.days, skipToday });
-  console.log(`\nFound ${found.sessions.length} saved Pi session${found.sessions.length === 1 ? "" : "s"}${found.firstDate ? ` to check for ${found.firstDate} through ${found.lastDate}` : skipToday ? ` to check through ${found.lastDate}` : ""}.`);
+    : `Only new or changed work blocks need summarizing. Selected, redacted history is sent to your ${backend.label} model; provider charges may apply.`);
+  const found = await collectSessions({ sessionDirectory: settings.sessionDirectory, claudeSessionDirectory: await claudeHistoryDirectory(settings), timeZone: settings.timeZone, days: range.days, skipToday });
+  console.log(`\nFound ${found.sessions.length} saved session${found.sessions.length === 1 ? "" : "s"}${found.firstDate ? ` to check for ${found.firstDate} through ${found.lastDate}` : skipToday ? ` to check through ${found.lastDate}` : ""}.`);
   if (found.sessions.length === 0) {
     console.log(`No saved sessions found. History folder: ${settings.sessionDirectory}`);
-    console.log(`If you have saved history elsewhere, choose it in '${commandName} init' (advanced settings). Otherwise, start a Pi session first.`);
+    console.log(`If you have saved history elsewhere, choose it in '${commandName} init' (advanced settings). Otherwise, start a Pi or Claude Code session first.`);
     if (found.warnings.length) {
       console.warn(found.warnings.join("\n"));
       process.exitCode = 1;
@@ -212,8 +231,8 @@ async function backfill(args) {
   process.once("SIGTERM", terminate);
   let result;
   try {
-    result = await writeSessions(createPiModelClient(generationSettings), found.sessions, settings, {
-      ...found, dryRun, onProgress: progress.onProgress, onSessionComplete: progress.onSessionComplete,
+    result = await writeSessions(createSummaryClient(generationSettings), found.sessions, settings, {
+      ...found, dryRun, refresh, onProgress: progress.onProgress, onSessionComplete: progress.onSessionComplete,
     });
   } finally {
     cleanupProgress();
@@ -272,6 +291,7 @@ async function status(args) {
   requireJournalPaths(settings);
   const found = await collectSessions({
     sessionDirectory: settings.sessionDirectory,
+    claudeSessionDirectory: await claudeHistoryDirectory(settings),
     timeZone: settings.timeZone,
     days: range.days,
     skipToday,
@@ -384,7 +404,8 @@ function helpText() {
     "  logdig init                         guided setup; nothing is summarized",
     "  logdig doctor                       check paths and Pi without a model request",
     "  logdig config                       edit numbered settings; q quits (redirected: read-only)",
-    "  logdig backfill [N|all] [--dry-run] [--skip-today]",
+    "  logdig backfill [N|all] [--dry-run] [--skip-today] [--refresh]",
+    "                                      --refresh rewrites summaries for the selected days",
     "                                      [--model provider/model|default]",
     "                                      [--thinking default|off|minimal|low|medium|high|xhigh|max]",
     "                                      journal saved sessions (default: last 3 days)",
@@ -393,13 +414,14 @@ function helpText() {
     "  logdig pi-install | pi-uninstall     add or remove /journal integration",
     "  logdig --version                    show the installed version",
     "",
-    "Preview first: --dry-run shows dates, files, and cache hits. It never calls Pi",
+    "Preview first: --dry-run shows dates, files, and cache hits. It never calls a model",
     "or writes files. Remove --dry-run when you're ready to summarize.",
     "--skip-today selects N complete calendar days ending yesterday, or all past work.",
     "Work periods with activity today are excluded entirely, including overnight work.",
     "",
-    "Real backfill uses Pi's startup model and existing authentication. Tools,",
-    "extensions, project context, and session saving are disabled for model requests.",
+    "Real backfill uses the summary backend's default model (Pi unless changed) and its",
+    "existing authentication. Tools, extensions, project context, and session saving are",
+    "disabled for model requests.",
     "Use --model default or --thinking default to ignore that saved override for one run.",
     "More thinking may improve accuracy, but can increase latency and token cost.",
     "More help: README.md and QUICKSTART.md",
@@ -439,13 +461,13 @@ async function main() {
       break;
     case "pi-install": {
       const settings = await loadSettings();
-      await runPiCommand(settings.piCommand, ["install", packageRoot], { inherit: true, timeoutMs: 120_000 });
+      await runCommand(settings.piCommand, ["install", packageRoot], { inherit: true, timeoutMs: 120_000 });
       console.log("Pi extension installed. Restart Pi or run /reload to load /journal.");
       break;
     }
     case "pi-uninstall": {
       const settings = await loadSettings();
-      await runPiCommand(settings.piCommand, ["remove", packageRoot], { inherit: true, timeoutMs: 120_000 });
+      await runCommand(settings.piCommand, ["remove", packageRoot], { inherit: true, timeoutMs: 120_000 });
       console.log("Pi extension removed.");
       break;
     }

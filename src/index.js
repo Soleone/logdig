@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { JOURNAL_SYSTEM_PROMPT, summaryCachePolicy } from "./journal.js";
+import { claudeHistoryDirectory } from "./session-sources.js";
 import { collectSessions, parseBackfillArgument, writeSessions } from "./session-runner.js";
 import { loadSettings } from "./settings.js";
 import { progressStatus } from "./cli-status.js";
@@ -26,7 +27,9 @@ function currentSession(ctx) {
   return session;
 }
 
-function extensionModelClient(ctx, settings) {
+// /journal runs inside Pi, so it uses Pi's models. Only a provider/model override applies here.
+function extensionModelClient(ctx, configured) {
+  const settings = { ...configured, summaryBackend: "pi", model: configured.model?.includes("/") ? configured.model : undefined };
   let model = ctx.model;
   if (settings.model) {
     const slash = settings.model.indexOf("/");
@@ -87,6 +90,7 @@ async function runBackfill(ctx, argument) {
   notify(ctx, dryRun ? "LogDig preview: no model requests or file changes." : "LogDig: checking recent sessions. Only new or changed summaries need model requests.");
   const found = await collectSessions({
     sessionDirectory: settings.sessionDirectory,
+    claudeSessionDirectory: await claudeHistoryDirectory(settings),
     timeZone: settings.timeZone,
     days: range.days,
     currentSession: currentSession(ctx),
@@ -178,6 +182,7 @@ export default function (pi) {
       notify(ctx, "LogDig: capturing recent sessions before shutdown. New summaries may take a few minutes.");
       const found = await collectSessions({
         sessionDirectory: settings.sessionDirectory,
+        claudeSessionDirectory: await claudeHistoryDirectory(settings),
         timeZone: settings.timeZone,
         days: 2,
         currentSession: currentSession(ctx),

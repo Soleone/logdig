@@ -157,11 +157,12 @@ test("chunked prompts preserve date changes even if the model digest loses dates
   assert.match(prompts.at(-1), /attached to the action or result they record/);
 });
 
-test("prompt-version changes invalidate old summaries without changing source identity", async (t) => {
+test("prompt and format version changes keep existing summaries until a refresh asks for them", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "logdig-prompt-version-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const client = { cachePolicy: { model: "Pi default" }, complete: async () => JSON.stringify(summary) };
   const current = await saveSessionSummary(client, root, session);
+  // A note written by an older LogDig: different version, different cache key, same evidence and settings.
   const oldFingerprint = createHash("sha256").update(JSON.stringify([
     "work-block-layers-v2", JOURNAL_SYSTEM_PROMPT, 16000, current.sourceFingerprint, [["model", "Pi default"]],
   ])).digest("hex");
@@ -169,8 +170,25 @@ test("prompt-version changes invalidate old summaries without changing source id
     .replace(`cacheFingerprint: "${current.cacheFingerprint}"`, `cacheFingerprint: "${oldFingerprint}"`)
     .replace('summaryVersion: "work-block-layers-v3"', 'summaryVersion: "work-block-layers-v2"');
   await writeFile(current.sessionPath, markdown);
+
   const inspected = await inspectSessionSummary(client, root, session);
-  assert.equal(inspected.reused, false);
-  assert.equal(inspected.sourceFingerprint, current.sourceFingerprint);
-  assert.notEqual(inspected.cacheFingerprint, oldFingerprint);
+  assert.equal(inspected.reused, true, "an upgrade alone must not regenerate the summary");
+  assert.equal(inspected.summary.small, summary.small);
+  assert.equal(inspected.cacheFingerprint, oldFingerprint, "the note keeps its entry identity");
+
+  const refreshed = await inspectSessionSummary(client, root, session, { refresh: true });
+  assert.equal(refreshed.reused, false, "--refresh regenerates even when the note is current");
+});
+
+test("notes from before generation fingerprints reuse when their model and thinking still match, and regenerate when thinking changes", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "logdig-legacy-note-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = { cachePolicy: { model: "Pi default" }, modelLabel: "Pi startup default", complete: async () => JSON.stringify(summary) };
+  const current = await saveSessionSummary(client, root, session);
+  const legacy = (await readFile(current.sessionPath, "utf8")).replace(/^generationFingerprint: .*\n/m, "");
+  await writeFile(current.sessionPath, legacy);
+
+  assert.equal((await inspectSessionSummary(client, root, session)).reused, true);
+  const withThinking = { ...client, cachePolicy: { model: "Pi default", thinkingLevel: "high" } };
+  assert.equal((await inspectSessionSummary(withThinking, root, session)).reused, false, "a thinking change still regenerates");
 });

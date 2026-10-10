@@ -10,7 +10,7 @@ import { sessionMetrics } from "../src/transcript.js";
 import { blockInRange, workBlocksForSession } from "../src/work-blocks.js";
 
 const REPO = fileURLToPath(new URL("../", import.meta.url));
-const PIPELINE_FILES = ["src/journal.js", "src/transcript.js", "src/work-blocks.js", "src/pi-client.js", "src/pi-process.js", "scripts/eval.js"];
+const PIPELINE_FILES = ["src/journal.js", "src/transcript.js", "src/work-blocks.js", "src/pi-client.js", "src/command-process.js", "scripts/eval.js"];
 export const ARMS = [
   { id: "luna-max", model: "openai-codex/gpt-6-luna", thinkingLevel: "max" },
   { id: "sol-medium", model: "openai-codex/gpt-6.1-sol", thinkingLevel: "medium" },

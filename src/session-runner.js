@@ -1,7 +1,8 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { appendDailyEntry, dailyEntryId, inspectDailyEntry, inspectSessionSummary, listJournaledSessions, saveSessionSummary } from "./journal.js";
-import { sessionFromJsonl, sessionMetrics } from "./transcript.js";
+import { SESSION_CODECS } from "./session-sources.js";
+import { sessionMetrics } from "./transcript.js";
 import { DEFAULT_CONCURRENCY } from "./settings.js";
 import { assignLegacyBlocks, blockInRange, workBlocksForSession } from "./work-blocks.js";
 
@@ -36,7 +37,10 @@ function sessionEndTime(session) {
   return Number.isFinite(headerTime) ? headerTime : 0;
 }
 
-async function findSessionFiles(root) {
+// Subagent transcripts are work delegated by a session, not sessions the user ran.
+const SKIPPED_DIRECTORIES = new Set(["subagent-artifacts", "subagents"]);
+
+async function findSessionFiles(root, missingWarning) {
   const files = [];
   const warnings = [];
   const pending = [root];
@@ -48,7 +52,7 @@ async function findSessionFiles(root) {
       entries = await readdir(directory, { withFileTypes: true });
     } catch (error) {
       if (error.code === "ENOENT") {
-        if (directory === root) warnings.push(`Pi history folder not found: ${root}. Start a saved Pi session or check the history path with 'logdig init'.`);
+        if (directory === root) warnings.push(missingWarning);
         continue;
       }
       throw error;
@@ -57,7 +61,7 @@ async function findSessionFiles(root) {
     for (const entry of entries) {
       const fullPath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name !== "subagent-artifacts") pending.push(fullPath);
+        if (!SKIPPED_DIRECTORIES.has(entry.name)) pending.push(fullPath);
       } else if (entry.isFile() && entry.name.endsWith(".jsonl") && entry.name !== "session.jsonl") {
         files.push(fullPath);
       }
@@ -67,8 +71,9 @@ async function findSessionFiles(root) {
   return { files, warnings };
 }
 
-export async function collectSessions({ sessionDirectory, timeZone, days, currentSession, skipToday = false }) {
-  const { files, warnings } = await findSessionFiles(sessionDirectory);
+export async function collectSessions({ sessionDirectory, claudeSessionDirectory, timeZone, days, currentSession, skipToday = false }) {
+  const folders = { sessionDirectory, claudeSessionDirectory };
+  const warnings = [];
   const currentId = currentSession?.header.id;
   const currentPath = currentSession?.sourcePath;
   const now = Date.now();
@@ -79,19 +84,31 @@ export async function collectSessions({ sessionDirectory, timeZone, days, curren
   const sessions = [];
   const seen = new Set();
 
-  for (const file of files) {
-    if (file === currentPath) continue;
+  for (const codec of SESSION_CODECS) {
+    const directory = folders[codec.directorySetting];
+    if (!directory) continue;
+    const found = await findSessionFiles(directory, codec.missingWarning(directory));
+    warnings.push(...found.warnings);
+    const parsed = [];
 
-    try {
-      const fileStat = await stat(file);
-      if (modifiedAfter && fileStat.mtimeMs < modifiedAfter) continue;
-      const session = sessionFromJsonl(await readFile(file, "utf8"), file);
-      if (session.header.id === currentId || seen.has(session.header.id)) continue;
-      seen.add(session.header.id);
-      sessions.push(session);
-    } catch (error) {
-      warnings.push(`${path.basename(file)}: ${error.message}`);
+    for (const file of found.files) {
+      if (file === currentPath) continue;
+
+      try {
+        const fileStat = await stat(file);
+        if (modifiedAfter && fileStat.mtimeMs < modifiedAfter) continue;
+        const session = codec.parse(await readFile(file, "utf8"), file);
+        if (session.header.id === currentId || seen.has(session.header.id)) continue;
+        seen.add(session.header.id);
+        parsed.push({ ...session, agent: codec.agent });
+      } catch (error) {
+        warnings.push(`${path.basename(file)}: ${error.message}`);
+      }
     }
+
+    // Collapsing shared records keeps the earlier session, so order by end time first.
+    parsed.sort((left, right) => sessionEndTime(left) - sessionEndTime(right) || left.header.id.localeCompare(right.header.id));
+    sessions.push(...(codec.collapse ? codec.collapse(parsed) : parsed));
   }
 
   if (currentSession && !seen.has(currentSession.header.id)) sessions.push(currentSession);
@@ -193,9 +210,12 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
         const journalBlock = { ...block, continuationOf };
         const { prerequisite } = blockProgress;
         range.onProgress?.({ ...blockProgress, phase: "checking", status: "CHECKING" });
+        // A refresh rewrites the summaries for the selected days only, never for prerequisite blocks outside them.
+        const refresh = Boolean(range.refresh) && !prerequisite;
         const cached = range.dryRun
-          ? await inspectSessionSummary(modelClient, settings.cacheDirectory, journalBlock)
+          ? await inspectSessionSummary(modelClient, settings.cacheDirectory, journalBlock, { refresh })
           : await saveSessionSummary(modelClient, settings.cacheDirectory, journalBlock, {
+            refresh,
             onGenerate: () => range.onProgress?.({ ...blockProgress, phase: "summarizing", status: "SUMMARIZING" }),
           });
         if (cached.reused) summariesReused++;

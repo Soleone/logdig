@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnPiProcess } from "../src/pi-process.js";
+import { spawnCommand } from "../src/command-process.js";
 
-test("Pi process launcher wraps Windows batch commands and quotes each argument", () => {
+test("Command launcher wraps Windows batch commands and quotes each argument", () => {
   let launch;
-  spawnPiProcess("C:\\Program Files\\Pi\\pi.cmd", ["--print", "journal system prompt"], { stdio: "pipe" }, {
+  spawnCommand("C:\\Program Files\\Pi\\pi.cmd", ["--print", "journal system prompt"], { stdio: "pipe" }, {
     platform: "win32",
     spawnProcess: (...args) => { launch = args; return "child"; },
   });
@@ -16,17 +16,17 @@ test("Pi process launcher wraps Windows batch commands and quotes each argument"
   assert.equal(launch[2].stdio, "pipe");
 });
 
-test("Pi process launcher rejects Windows command text that could escape argument quoting", () => {
-  assert.throws(() => spawnPiProcess("pi", ["--model", "provider/model%PATH%"], {}, {
+test("Command launcher rejects Windows command text that could escape argument quoting", () => {
+  assert.throws(() => spawnCommand("pi", ["--model", "provider/model%PATH%"], {}, {
     platform: "win32",
     spawnProcess: () => assert.fail("unsafe command should not spawn"),
   }), /percent signs/);
 });
 
-test("Pi process launcher passes native argument arrays through on other platforms", () => {
+test("Command launcher passes native argument arrays through on other platforms", () => {
   const args = ["--print", "prompt with spaces"];
   let launch;
-  const result = spawnPiProcess("pi", args, { stdio: "pipe" }, {
+  const result = spawnCommand("pi", args, { stdio: "pipe" }, {
     platform: "linux",
     spawnProcess: (...values) => { launch = values; return "child"; },
   });

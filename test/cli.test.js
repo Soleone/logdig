@@ -58,6 +58,7 @@ else {
     dailySummary: "small",
     timeZone: "UTC",
     sessionDirectory,
+    claudeSessionDirectory: false,
     piCommand,
     model: "test/fake",
     autoCapture: false,
@@ -65,7 +66,8 @@ else {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
     !key.startsWith("PI_JOURNAL_") && !key.startsWith("LOGDIG_") && key !== "PI_CODING_AGENT_SESSION_DIR",
   ));
-  Object.assign(env, { LOGDIG_CONFIG_PATH: filePath, PI_CODING_AGENT_DIR: path.join(root, "pi"), PI_OFFLINE: "1" });
+  // Keeps tests off the real ~/.claude folder, which backfill reads automatically.
+  Object.assign(env, { LOGDIG_CONFIG_PATH: filePath, PI_CODING_AGENT_DIR: path.join(root, "pi"), CLAUDE_CONFIG_DIR: path.join(root, "claude-config"), PI_OFFLINE: "1" });
   if (configured) await saveSettings(settings, filePath);
   else env.PI_JOURNAL_PI_COMMAND = piCommand;
   return { root, env, filePath, settings, callsPath };
@@ -143,6 +145,7 @@ test("setup explains choices and recovers locally from invalid paths, headings, 
     "Log", "# Log",
     "tiny", "MEDIUM",
     "Not/A_Timezone", "UTC",
+    "pi",
     "maybe", "yes",
     notAFolder, w.settings.sessionDirectory,
     w.settings.piCommand,
@@ -182,7 +185,7 @@ test("setup explains choices and recovers locally from invalid paths, headings, 
 test("declining setup confirmation preserves the existing settings byte for byte", async (t) => {
   const w = await workspace(t);
   const before = await readFile(w.filePath, "utf8");
-  const input = ["", "", "", "", "", "", "no", "no", "no", "no"].join("\n") + "\n";
+  const input = ["", "", "", "", "", "", "", "no", "no", "no", "no"].join("\n") + "\n";
   const result = await runCli(["init"], w.env, { input });
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /settings were not changed/);
@@ -194,7 +197,7 @@ test("setup keeps or clears a saved anchor heading", async (t) => {
   const w = await workspace(t);
   await saveSettings({ ...w.settings, dailyHeaderAnchor: "# Log" }, w.filePath);
   for (const answer of ["", "none"]) {
-    const input = ["", "", "", answer, "", "", "no", "no", "no", "yes"].join("\n") + "\n";
+    const input = ["", "", "", answer, "", "", "", "no", "no", "no", "yes"].join("\n") + "\n";
     const result = await runCli(["init"], w.env, { input });
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /Anchor heading .*\[# Log\]/);
@@ -257,7 +260,7 @@ test("doctor reports every broken path and missing Pi in one pass", async (t) =>
   const w = await workspace(t);
   const file = path.join(w.root, "not-a-folder");
   await writeFile(file, "keep this");
-  await saveSettings({ ...w.settings, cacheDirectory: file, dailyDirectory: file, piCommand: path.join(w.root, "missing-pi") }, w.filePath);
+  await saveSettings({ ...w.settings, cacheDirectory: file, dailyDirectory: file, summaryBackend: "pi", piCommand: path.join(w.root, "missing-pi") }, w.filePath);
   const result = await runCli(["doctor"], w.env);
   assert.equal(result.code, 1);
   assert.match(result.stderr, /FIX   Summary cache/);
@@ -567,7 +570,7 @@ test("parallel CLI progress identifies same-time sessions and continuation block
   }
   const first = await runCli(["backfill", "1"], w.env);
   assert.equal(first.code, 0, first.stderr);
-  assert.match(first.stdout, /Found 2 saved Pi sessions/);
+  assert.match(first.stdout, /Found 2 saved sessions/);
   assert.match(first.stdout, /Results are shown in session order/);
   assert.match(first.stdout, /Checked: 4 work blocks across 2 sessions\./);
   assert.equal((await calls(w.callsPath)).length, 4);
@@ -794,7 +797,8 @@ test("saved concurrency is shown by config and backfill without changing setting
 test("setup can clear a saved thinking override without changing the selected model", async (t) => {
   const w = await workspace(t);
   await saveSettings({ ...w.settings, thinkingLevel: "max" }, w.filePath);
-  const input = ["", "", "", "", "", "", "yes", "", "", "", "default", "", "no", "no", "yes"].join("\n") + "\n";
+  // Summaries default to auto, so setup also asks for the Claude Code command.
+  const input = ["", "", "", "", "", "", "", "yes", "", "", "", "", "default", "", "no", "no", "yes"].join("\n") + "\n";
   const result = await runCli(["init"], w.env, { input });
   assert.equal(result.code, 0, result.stderr);
   const saved = await loadSettings({ filePath: w.filePath, env: {} });

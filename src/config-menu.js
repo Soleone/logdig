@@ -22,17 +22,24 @@ const fields = [
   { key: "piCommand", label: "Pi executable",
     hint: "A command on your PATH, such as pi, or a full executable path." },
   { key: "model", label: "Summary model", empty: "default",
-    hint: "Use provider/model, or type default to remove the LogDig override. Changing the model can require new summaries." },
+    hint: "Pi: provider/model. Claude Code: an alias such as haiku or sonnet, or a full model name. Type default to remove the LogDig override. Changing the model can require new summaries." },
   { key: "thinkingLevel", label: "Thinking level", empty: "default",
     choices: ["default", "off", "minimal", "low", "medium", "high", "xhigh", "max"],
-    hint: "More thinking may take longer and cost more. Model support varies. Default removes the LogDig override." },
+    hint: "More thinking may take longer and cost more. Model support varies. Claude Code accepts default, low, medium, high, xhigh, or max. Default removes the LogDig override." },
   { key: "concurrency", label: "Maximum parallel sessions",
     hint: "A positive integer. Use 1 for sequential processing or to reduce rate-limit pressure." },
   { key: "autoCapture", label: "Automatic capture", choices: ["yes", "no"],
     hint: "Capture on Pi shutdown. Requires the Pi extension; sends selected, redacted history to your model, may incur charges, and can delay shutdown. Redaction is not a complete secret scanner." },
+  { key: "claudeSessionDirectory", label: "Claude Code history folder", folder: "read", empty: "auto", off: "off",
+    hint: "auto reads ~/.claude/projects when it exists. Type a folder to read another one, or off to skip Claude Code sessions." },
+  { key: "summaryBackend", label: "Summary backend", choices: ["auto", "pi", "claude"],
+    hint: "auto uses Pi when it is installed, otherwise Claude Code. Choose pi or claude to pin one. If you have a model or thinking override, change it to fit the chosen backend first." },
+  { key: "claudeCommand", label: "Claude Code command",
+    hint: "A command on your PATH, such as claude, or a full executable path." },
 ];
 
 function displayValue(field, value) {
+  if (field.off && value === false) return field.off;
   if (typeof value === "boolean") return value ? "yes" : "no";
   return String(value || field.empty || "not configured");
 }
@@ -112,9 +119,11 @@ export async function editConfig(commandName = "logdig", { input = stdin, output
             if (!/^(yes|no|y|n)$/i.test(value)) throw new Error("Please enter yes or no");
             parsed = /^(yes|y)$/i.test(value);
           } else if (field.key === "model" && value.toLowerCase() === "default") parsed = undefined;
+          else if (field.key === "claudeSessionDirectory" && value.toLowerCase() === "off") parsed = false;
+          else if (field.key === "claudeSessionDirectory" && value.toLowerCase() === "auto") parsed = undefined;
           else if (field.key === "dailyHeaderAnchor" && value.toLowerCase() === "none") parsed = "";
           nextSettings = validateSettings({ ...settings, [field.key]: parsed });
-          if (field.folder) await checkDirectory(nextSettings[field.key], { writable: field.folder === "write", allowMissing: true });
+          if (field.folder && nextSettings[field.key]) await checkDirectory(nextSettings[field.key], { writable: field.folder === "write", allowMissing: true });
         } catch (error) {
           print(`  ${error.message}. Let's try that again.`);
           continue;

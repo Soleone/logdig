@@ -279,7 +279,8 @@ export function renderSessionNote(session, summary, cacheFingerprint, model, log
   const logUsage = logMetrics && formatUsage(logMetrics);
   return [
     "---",
-    'type: "pi-session-journal"',
+    `type: "${session.agent || "pi"}-session-journal"`,
+    `agent: ${session.agent || "pi"}`,
     `date: ${frontmatterValue(session.date)}`,
     `time: ${frontmatterValue(session.time)}`,
     `timezone: ${frontmatterValue(session.timezone)}`,
@@ -291,6 +292,7 @@ export function renderSessionNote(session, summary, cacheFingerprint, model, log
     `cwd: ${frontmatterValue(session.header.cwd || "")}`,
     `sourceFingerprint: ${frontmatterValue(session.sourceFingerprint)}`,
     `cacheFingerprint: ${frontmatterValue(cacheFingerprint)}`,
+    ...(session.generationFingerprint ? [`generationFingerprint: ${frontmatterValue(session.generationFingerprint)}`] : []),
     `summaryVersion: ${frontmatterValue(SUMMARY_VERSION)}`,
     `model: ${frontmatterValue(model)}`,
     ...(sessionUsage ? [`sessionUsage: ${JSON.stringify(sessionUsage)}`] : []),
@@ -331,7 +333,7 @@ async function readMarkdownIfPresent(filePath) {
 
 export function summaryCachePolicy(settings) {
   return {
-    model: settings.model || "Pi default",
+    model: settings.model || (settings.summaryBackend === "claude" ? "Claude Code default" : "Pi default"),
     ...(settings.thinkingLevel !== undefined ? { thinkingLevel: settings.thinkingLevel } : {}),
   };
 }
@@ -356,36 +358,49 @@ function sourceFingerprintForProject(session, project) {
   ]);
 }
 
-export async function inspectSessionSummary(modelClient, cacheDirectory, session) {
+function modelLabelWithThinking(modelClient) {
+  const model = modelClient.modelLabel || "Pi default";
+  const thinkingLevel = modelClient.cachePolicy?.thinkingLevel;
+  return thinkingLevel === undefined ? model : `${model}:${thinkingLevel}`;
+}
+
+export async function inspectSessionSummary(modelClient, cacheDirectory, session, { refresh = false } = {}) {
   const sourceFingerprint = hashValue([session.project, session.timezone, session.context || [], session.events]);
-  // Keep generation policy separate from evidence so model and thinking changes can
-  // invalidate summaries without changing work-block identity or range selection.
+  // A summary is reused while its evidence and its model and thinking settings are unchanged.
+  // Prompt and format versions do not invalidate it. An upgrade keeps existing summaries until
+  // a refresh asks for them to be rewritten.
   const policy = Object.entries(modelClient.cachePolicy || { model: "Pi default" }).sort(([left], [right]) => left.localeCompare(right));
+  const generationFingerprint = hashValue([policy]);
   const cacheFingerprint = hashValue([SUMMARY_VERSION, JOURNAL_SYSTEM_PROMPT, CHUNK_LIMIT, sourceFingerprint, policy]);
   const suffix = session.blockIndex > 0 ? `-${session.blockId}` : "";
   const sessionPath = path.join(cacheDirectory, "Sessions", `${safeFileName(session.header.id)}${suffix}.md`);
   const cached = await readMarkdownIfPresent(sessionPath);
   const existing = cached && parseSessionNote(cached);
+  // Notes written before generationFingerprint existed match on the model label they recorded.
+  const generationMatches = (note) => note.generationFingerprint
+    ? note.generationFingerprint === generationFingerprint
+    : note.model === modelLabelWithThinking(modelClient);
 
-  const reused = existing?.cacheFingerprint === cacheFingerprint;
+  const reused = Boolean(existing) && !refresh && existing.sourceFingerprint === sourceFingerprint && generationMatches(existing);
   const previousSourceFingerprint = existing?.project && existing.project !== session.project
     ? sourceFingerprintForProject(session, existing.project)
     : undefined;
-  const relabeledReuse = !reused && previousSourceFingerprint === existing?.sourceFingerprint &&
-    existing?.cacheFingerprint === hashValue([SUMMARY_VERSION, JOURNAL_SYSTEM_PROMPT, CHUNK_LIMIT, previousSourceFingerprint, policy]);
+  const relabeledReuse = Boolean(existing) && !refresh && !reused && previousSourceFingerprint !== undefined &&
+    previousSourceFingerprint === existing.sourceFingerprint && generationMatches(existing);
   const reusable = reused || relabeledReuse;
   return {
     sessionPath,
     sourceFingerprint: reusable ? existing.sourceFingerprint : sourceFingerprint,
     cacheFingerprint: reusable ? existing.cacheFingerprint : cacheFingerprint,
+    generationFingerprint: reusable && existing.generationFingerprint ? existing.generationFingerprint : generationFingerprint,
     reused: reusable,
     continuationOf: existing?.continuationOf,
     summary: reusable ? existing.summary : undefined,
   };
 }
 
-export async function saveSessionSummary(modelClient, cacheDirectory, session, { onGenerate } = {}) {
-  const cached = await inspectSessionSummary(modelClient, cacheDirectory, session);
+export async function saveSessionSummary(modelClient, cacheDirectory, session, { onGenerate, refresh = false } = {}) {
+  const cached = await inspectSessionSummary(modelClient, cacheDirectory, session, { refresh });
   if (cached.reused) {
     const markdown = await readFile(cached.sessionPath, "utf8");
     let enriched = enrichSessionNote(markdown, cached.sourceFingerprint, sessionMetrics(session));
@@ -403,10 +418,11 @@ export async function saveSessionSummary(modelClient, cacheDirectory, session, {
   const summary = await summarizeSession(modelClient, session, (usage) => usages.push(usage));
   const logMetrics = sessionMetrics({ header: {}, entries: usages.map((usage) => ({ type: "usage", usage })) });
   logMetrics.durationSeconds = Math.round((Date.now() - started) / 1000);
-  const model = modelClient.modelLabel || "Pi default";
-  const thinkingLevel = modelClient.cachePolicy?.thinkingLevel;
-  const modelWithThinking = thinkingLevel === undefined ? model : `${model}:${thinkingLevel}`;
-  const markdown = renderSessionNote({ ...session, sourceFingerprint: cached.sourceFingerprint }, summary, cacheFingerprint, modelWithThinking, logMetrics);
+  const markdown = renderSessionNote({
+    ...session,
+    sourceFingerprint: cached.sourceFingerprint,
+    generationFingerprint: cached.generationFingerprint,
+  }, summary, cacheFingerprint, modelLabelWithThinking(modelClient), logMetrics);
   await writeAtomically(sessionPath, markdown);
   return { ...cached, summary, continuationOf: session.continuationOf, reused: false };
 }

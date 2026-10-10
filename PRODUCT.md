@@ -22,13 +22,13 @@ Originally made for Obsidian. Daily pages are ordinary Markdown with YYYY-MM-DD.
 
 ## Capabilities and Constraints
 
-- Node.js 22.19+; Pi installed and authenticated for real summarization.
+- Node.js 22.19+; Pi or Claude Code installed and authenticated for real summarization.
 - CLI backfill defaults to four independent sessions in parallel; concurrency is configurable.
 - Reuses unchanged summaries; preserves handwritten content and manually edited daily blurbs.
 - Small, Medium and Large summaries per work block; continuation links for resumed sessions.
 - Read-only dry run; real runs send selected, redacted evidence to the configured model and may incur charges.
 - Redaction is not a complete secret scanner. Summaries are not proof of completed work.
-- Saved Pi history only; other coding-agent formats are not supported.
+- Saved Pi and Claude Code history, read together when present. Other coding-agent formats, such as Codex, are not supported yet.
 
 ## Brand Commitments
 

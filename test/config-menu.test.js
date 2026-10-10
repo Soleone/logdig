@@ -15,7 +15,7 @@ async function workspace(t, { configured = true } = {}) {
     dailyDirectory: path.join(root, "daily"), cacheDirectory: path.join(root, "cache"),
     sessionDirectory: path.join(root, "sessions"), dailyHeader: "# Projects",
     dailyHeaderAnchor: "# Log", dailySummary: "small", timeZone: "UTC", piCommand: "pi",
-    model: "test/fake", thinkingLevel: "max", concurrency: 4, autoCapture: false,
+    model: "test/fake", thinkingLevel: "max", concurrency: 4, autoCapture: false, summaryBackend: "pi",
   };
   if (configured) await saveSettings(settings, filePath);
   return { root, filePath, settings, env: { LOGDIG_CONFIG_PATH: filePath } };
@@ -68,9 +68,9 @@ test("config lists aligned numbered settings, supports numbers above nine, saves
 
 test("names and keys select settings; ambiguous names and invalid numbers do not change anything", async (t) => {
   const w = await workspace(t);
-  const text = await menu(w, ["summary", "0", "13", "bogus", "ThinkingLevel", "off", "parallel", "1", "q"]);
+  const text = await menu(w, ["summary", "0", "16", "bogus", "ThinkingLevel", "off", "parallel", "1", "q"]);
   assert.match(text, /Please be more specific: 2\. Summary cache folder; 5\. Daily summary length/);
-  assert.match(text, /Choose a number from 1 to 12/);
+  assert.match(text, /Choose a number from 1 to 15/);
   assert.match(text, /Available values: default, off, minimal, low, medium, high, xhigh, max/);
   assert.equal((await saved(w)).thinkingLevel, "off");
   assert.equal((await saved(w)).concurrency, 1);

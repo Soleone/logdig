@@ -1,10 +1,10 @@
 # LogDig quickstart
 
-A small work journal in your existing Obsidian daily notes. Start manually, with one day, and keep automatic capture off until the results feel useful.
+A small work journal in your existing Obsidian daily notes, built from your Pi and Claude Code sessions. Start manually, with one day, and keep automatic capture off until the results feel useful.
 
 ## 1. Install and configure
 
-With Node.js 22.19+ and Pi installed:
+With Node.js 22.19+ and either Pi or Claude Code installed and signed in:
 
 ```sh
 npm install -g logdig
@@ -20,7 +20,9 @@ In the wizard:
 - **Heading and length:** `# Projects` and `small` are a good first try. Your personal `# Log` stays separate.
 - **Anchor heading:** optionally choose `# Log` to create Projects at the end of the Log section, before the next same-level or higher-level heading. The default is `none` (blank): append at the end of the note. Missing anchors also append at the end; existing Projects sections stay in place.
 - **Timezone:** check that this is the timezone you journal in.
-- **Advanced settings:** choose a custom Pi history folder, executable, model, thinking level, or concurrency here. Thinking defaults to no LogDig override; choose an explicit level such as `max` for a cost-first reasoning model if you are willing to wait longer. Concurrency defaults to four independent sessions; use `1` for sequential processing.
+- **Summarize with:** `auto` (the default) uses Pi when it is installed, and Claude Code otherwise. One run summarizes all your sessions with that one tool. Choose `pi` or `claude` to pin one.
+- **Sessions:** Pi sessions are read from your Pi history folder. Claude Code sessions are read automatically from `~/.claude/projects` when that folder exists. Both go into the same notes. You can turn Claude Code off later in `logdig config`.
+- **Advanced settings:** choose a custom Pi history folder, Pi executable or Claude Code command, model, thinking level, or concurrency here. Thinking defaults to no LogDig override; choose an explicit level such as `max` for a cost-first reasoning model if you are willing to wait longer. Concurrency defaults to four independent sessions; use `1` for sequential processing.
 - **Automatic capture:** choose **no** for now.
 - **Pi extension:** optional. The CLI works without it.
 
@@ -55,7 +57,7 @@ logdig backfill 30 --skip-today
 
 This selects complete calendar days through yesterday in your timezone and excludes whole work periods that continued today. Earlier periods in the same session can still be logged. Each wider run reuses unchanged summaries. The flag also works with `backfill all` and `status`.
 
-If no history is found at all, start a saved Pi session or select the right history folder in the wizard's advanced settings.
+If no history is found at all, start a saved Pi or Claude Code session, or select the right history folder in the wizard's advanced settings. `doctor` shows which history folders and summary backend LogDig is using.
 
 ## 3. Make the first entry
 
@@ -67,13 +69,15 @@ logdig backfill 1
 
 To override the model and thinking level for one run, use `logdig backfill 1 --model provider/model --thinking max`. Use `--thinking default` to ignore a saved thinking override. More thinking may improve factual reconstruction, but can increase latency and token cost; available effort depends on the model. Saved thinking preferences also apply to `/journal` and automatic capture.
 
-This may send selected, redacted history to your Pi model and incur provider charges. Pi uses its existing authentication. If authentication fails, open Pi, run `/login`, then retry. Common secrets are redacted, but redaction is not a complete secret scanner.
+This may send selected, redacted history to your summary model and incur provider charges. Pi uses its existing authentication, and Claude Code uses your `claude` login. If authentication fails, run `/login` in Pi or `claude`, then retry. Common secrets are redacted, but redaction is not a complete secret scanner.
 
-Open the daily-note date printed by the command. You will find project subheadings under `# Projects`, with timestamped summaries grouped beneath each one. Your existing text stays in place. Click a timestamp to open that entry's saved snapshot of all three summary lengths, or browse `<cache folder>/Sessions/` for the latest work-block summaries.
+Open the daily-note date printed by the command. You will find project subheadings under `# Projects`, with timestamped summaries grouped beneath each one. Your existing text stays in place. Click a timestamp to open that entry's saved snapshot of all three summary lengths, or browse `<cache folder>/Sessions/` for the latest work-block summaries. Snapshots written from now on include `agent: pi` or `agent: claude-code` in their front matter.
 
 Repeating unchanged work reuses its summary and does not insert that entry again. Session renames and other bookkeeping do not trigger regeneration. New work in the same block updates that block's row; continuation blocks get separate linked entries. Manually edited blurbs and older snapshots in `Entries/` are preserved. Run only one save at a time against your journal, and let vault sync finish first.
 
 If you used the older whole-session journal format, the first real save regenerates summaries for selected work blocks and migrates the old rows while keeping their linked snapshots. Preview before saving to check the dates and model work.
+
+Existing summaries are kept when LogDig upgrades. A summary is regenerated only when its source changes, or when you change the model or thinking level. To rewrite summaries after an upgrade, run `logdig backfill N --refresh` for the days you want refreshed, and preview it with `--dry-run` first.
 
 ## Optional: use `/journal` inside Pi
 
@@ -88,7 +92,7 @@ Restart Pi or run `/reload`. Then, inside Pi:
 /journal
 ```
 
-The first command previews today. The second journals the current session using your active Pi model, unless you configured an override. Automatic capture remains off unless you enable it.
+The first command previews today. The second journals the current session using your active Pi model, unless you configured a `provider/model` override. This extension always uses Pi's models, even when the summary backend is set to Claude Code. Automatic capture remains off unless you enable it.
 
 ## Updating
 

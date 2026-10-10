@@ -1,6 +1,6 @@
 import os from "node:os";
 import { JOURNAL_SYSTEM_PROMPT, summaryCachePolicy } from "./journal.js";
-import { spawnPiProcess } from "./pi-process.js";
+import { spawnCommand } from "./command-process.js";
 
 const MODEL_TIMEOUT_MS = 5 * 60 * 1000;
 const THINKING_TIMEOUT_MS = 30 * 60 * 1000;
@@ -32,7 +32,7 @@ function piArguments(settings) {
 
 function runPiPrompt(prompt, settings, spawnProcess) {
   return new Promise((resolve, reject) => {
-    const child = spawnPiProcess(settings.piCommand || "pi", piArguments(settings), {
+    const child = spawnCommand(settings.piCommand || "pi", piArguments(settings), {
       cwd: os.tmpdir(),
       env: process.env,
       stdio: ["pipe", "pipe", "pipe"],

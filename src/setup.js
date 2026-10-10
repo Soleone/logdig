@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import { stdin, stdout } from "node:process";
 import { checkDirectory } from "./directories.js";
 import { environmentOverrides, saveSettings, validateSettings } from "./settings.js";
+import { summaryBackendFor } from "./summary-backends.js";
 
 function yesNo(value) {
   if (/^(y|yes)$/i.test(value)) return true;
@@ -14,7 +15,7 @@ function yesNo(value) {
 export async function configureLogDig(settings, commandName = "logdig") {
   console.log([
     "LogDig setup",
-    "A small work journal from your Pi sessions, in the notes you already use.",
+    "A small work journal from your Pi and Claude Code sessions, in the notes you already use.",
     "",
     "Press Enter to keep a default. Ctrl+C leaves your settings unchanged.",
     "No history is summarized and no daily notes are written during setup.",
@@ -76,32 +77,49 @@ export async function configureLogDig(settings, commandName = "logdig") {
     const dailySummary = await ask("Daily summary (small/medium/large)", settings.dailySummary, (value) => field("dailySummary", value));
     const timeZone = await ask("Timezone", settings.timeZone, (value) => field("timeZone", value));
 
-    console.log("\n2. Pi and privacy");
+    console.log("\n2. Summaries and privacy");
+    console.log("Claude Code sessions are included automatically when ~/.claude/projects exists. Turn them off in 'config' if you don't want them.");
+    console.log("auto summarizes with Pi when it is installed, and with Claude Code otherwise. Choose pi or claude to pin one.");
+    const previousBackend = settings.summaryBackend || "auto";
+    const summaryBackend = await ask("Summarize with (auto/pi/claude)", previousBackend,
+      (value) => validateSettings({ ...settings, summaryBackend: value, model: undefined, thinkingLevel: undefined }).summaryBackend);
+    if (summaryBackend !== previousBackend) {
+      // Model and thinking names differ between backends, so the old overrides are cleared.
+      settings = { ...settings, summaryBackend, model: undefined, thinkingLevel: undefined };
+      console.log("Model and thinking were reset for the new backend. Set them in advanced settings if you want overrides.");
+    }
+    const backend = summaryBackendFor(settings);
     console.log(`History: ${settings.sessionDirectory}`);
-    console.log(`Model: ${settings.model || "Pi's default (your active model for /journal)"}`);
+    console.log(`Model: ${settings.model || (summaryBackend === "pi" ? "Pi's default (your active model for /journal)" : backend.defaultModelLabel)}`);
     console.log(`Thinking: ${settings.thinkingLevel || "default (no LogDig override)"}`);
     console.log(`Parallel sessions: ${settings.concurrency}`);
-    const advanced = await ask("Change history folder, Pi executable, model, thinking level, or concurrency? (yes/no)", "no", yesNo);
-    let { sessionDirectory, piCommand, model, thinkingLevel, concurrency } = settings;
+    const advanced = await ask(`Change history folder, ${backend.label} command, model, thinking level, or concurrency? (yes/no)`, "no", yesNo);
+    let { sessionDirectory, piCommand, claudeCommand, model, thinkingLevel, concurrency } = settings;
     if (advanced) {
       sessionDirectory = await ask("Pi session-history folder", sessionDirectory,
         (value) => folder("sessionDirectory", value, false));
-      piCommand = await ask("Pi executable", piCommand, (value) => field("piCommand", value));
-      model = await ask("Model (provider/model), or 'default'", model || "default",
+      if (summaryBackend !== "claude") {
+        piCommand = await ask("Pi executable", piCommand, (value) => field("piCommand", value));
+      }
+      if (summaryBackend !== "pi") {
+        claudeCommand = await ask("Claude Code command", claudeCommand, (value) => field("claudeCommand", value));
+      }
+      model = await ask(`Model (${backend.modelHint}), or 'default'`, model || "default",
         (value) => value.toLowerCase() === "default" ? undefined : field("model", value));
       console.log("More thinking can help distinguish attempts from outcomes, but takes longer and may cost more. Support depends on the model.");
-      thinkingLevel = await ask("Thinking level (default/off/minimal/low/medium/high/xhigh/max)", thinkingLevel || "default",
+      const thinkingChoices = summaryBackend === "claude" ? "default/low/medium/high/xhigh/max" : "default/off/minimal/low/medium/high/xhigh/max";
+      thinkingLevel = await ask(`Thinking level (${thinkingChoices})`, thinkingLevel || "default",
         (value) => field("thinkingLevel", value));
       console.log("Independent sessions run in parallel. Use 1 for sequential processing or to reduce provider rate-limit pressure.");
       concurrency = await ask("Maximum parallel sessions", concurrency, (value) => field("concurrency", value));
     }
-    console.log("Summarizing sends selected, redacted history to your Pi model. Provider charges may apply.");
-    console.log("Common secrets are redacted, but this is not a complete secret scanner. Pi keeps your credentials.");
+    console.log(`Summarizing sends selected, redacted history to your ${backend.label} model. Provider charges may apply.`);
+    console.log(`Common secrets are redacted, but this is not a complete secret scanner. ${backend.label} keeps your credentials.`);
     console.log("Automatic capture may delay shutdown. Leave it off until you've tried a manual run.");
     const autoCapture = await ask("Capture on Pi shutdown? (yes/no)", settings.autoCapture ? "yes" : "no", yesNo);
     installExtension = await ask("Install the Pi extension for /journal? (yes/no)", "no", yesNo);
 
-    nextSettings = { ...settings, cacheDirectory, dailyDirectory, dailyHeader, dailyHeaderAnchor, dailySummary, timeZone, sessionDirectory, piCommand, model, thinkingLevel, concurrency, autoCapture };
+    nextSettings = { ...settings, cacheDirectory, dailyDirectory, dailyHeader, dailyHeaderAnchor, dailySummary, timeZone, sessionDirectory, summaryBackend, piCommand, claudeCommand, model, thinkingLevel, concurrency, autoCapture };
     console.log([
       "",
       "Ready to save",
@@ -111,8 +129,8 @@ export async function configureLogDig(settings, commandName = "logdig") {
       `  Summary:     ${dailySummary}, in ${timeZone}`,
       `  Cache:       ${path.join(cacheDirectory, "Sessions")}`,
       `  History:     ${sessionDirectory}`,
-      `  Pi:          ${piCommand}`,
-      `  Model:       ${model || "Pi default"}`,
+      `  Summaries:   ${summaryBackend === "auto" ? `${backend.label}` : `${backend.label} (${summaryBackend === "claude" ? claudeCommand : piCommand})`}`,
+      `  Model:       ${model || backend.defaultModelLabel}`,
       `  Thinking:    ${thinkingLevel || "default (no LogDig override)"}`,
       `  Parallel sessions: ${concurrency}`,
       `  Auto-capture: ${autoCapture ? "on" : "off"}`,

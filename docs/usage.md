@@ -4,7 +4,7 @@ For the overview, see [the README](../README.md). This page covers behavior, set
 
 Remember what you worked on, without writing another status report.
 
-LogDig turns saved [Pi](https://pi.dev) sessions into short entries in your Obsidian daily notes. Your handwritten content stays in place. Each work block also gets a cached Markdown note with **Small**, **Medium**, and **Large** summaries, so the details are there when you want them.
+LogDig turns saved [Pi](https://pi.dev) sessions, and optionally Claude Code sessions, into short entries in your Obsidian daily notes. Your handwritten content stays in place. Each work block also gets a cached Markdown note with **Small**, **Medium**, and **Large** summaries, so the details are there when you want them.
 
 No build step, runtime dependencies, or separate model credentials. Try a safe preview before sending any history to a model.
 
@@ -133,9 +133,15 @@ The identifier in each timestamp link prevents duplicate entries, without HTML c
 
 **Upgrading from whole-session journaling:** old summaries use an incompatible cache key and need one regeneration per selected work block. A real save assigns legacy entries to their work blocks using their recorded journal timestamp, updates or relocates their rows as needed, and keeps the original linked snapshots. Run `backfill N --dry-run` first to see the scope and model work. Status and preview never migrate files.
 
+**Summary reuse:** a saved summary is reused while its source evidence and its model and thinking settings stay the same. An upgrade that changes the summary prompt or format does not regenerate existing summaries, so new work gets the new style and old notes stay as they are. To rewrite summaries for the days you select, add `--refresh`, for example `logdig backfill 14 --refresh --dry-run` to preview. Changing the model or thinking level regenerates summaries for the selected days, so set those deliberately. Previews count regenerated summaries as `create` and changed daily entries as `update`.
+
 Saved heading preferences are not overridden by new defaults; rerun setup to change them. New entries keep their timestamps inline even when their project already has entries. Headings inside frontmatter or fenced code are not insertion targets.
 
-Missing daily-note and cache folders are created only by a real save. Raw Pi history stays in Pi's storage.
+Missing daily-note and cache folders are created only by a real save. Raw Pi and Claude Code history stays in its own folders.
+
+**Pi and Claude Code together:** `logdig backfill` reads Pi sessions and Claude Code sessions in one run and treats them the same. Each note's front matter says which tool it came from (`agent: pi` or `agent: claude-code`). Claude Code history is read from `~/.claude/projects`, or from `$CLAUDE_CONFIG_DIR/projects` when that variable is set, whenever that folder exists. Set **Claude Code history folder** in `config` (or `PI_JOURNAL_CLAUDE_SESSION_DIR`) to read another folder, or type `off` to skip Claude Code sessions. Subagent transcripts are skipped. A resumed Claude Code session copies earlier records into a new file, so each record is counted once, in the earlier session. LogDig only reads that folder and never changes it.
+
+**Summary backend:** `summaryBackend` defaults to `auto`. It uses Pi when `piCommand` is installed and Claude Code otherwise, so one run summarizes all sessions with one tool. Pin `pi` or `claude` to choose one. With `claude`, LogDig runs the `claude` command (`claudeCommand`, or `PI_JOURNAL_CLAUDE_COMMAND`) once per request, with no tools, no saved session, and no user hooks or slash commands. Set `model` to a Claude Code alias such as `haiku` or `sonnet`, or to a full model name, or to `provider/model` for Pi. Effort (`thinkingLevel`) accepts `default`, `low`, `medium`, `high`, `xhigh`, or `max` with Claude Code. Claude Code reports cost as a list-price estimate, not a billed amount. The Pi extension's `/journal` always uses Pi's models. Changing the backend or model can make cached summaries stale, so preview first.
 
 ## Commands
 
@@ -205,7 +211,7 @@ More thinking can help separate proposals, failed attempts, and verified outcome
 
 Selected user prompts, assistant conclusions, tool actions, test results, and error excerpts are sent to the chosen model after common credential redaction. System prompts, hidden reasoning, and image payloads are excluded. **Redaction is not a comprehensive secret scanner.** Review your provider's data handling before processing sensitive sessions or enabling automatic capture. Summaries can also contain private project details, so treat your cache and vault accordingly.
 
-Model summaries are aids to memory, not proof of completed work. Keep Pi history as the source of truth.
+Model summaries are aids to memory, not proof of completed work. Keep your saved sessions as the source of truth.
 
 ## Settings and troubleshooting
 

@@ -5,7 +5,14 @@ import { randomUUID } from "node:crypto";
 
 export const DEFAULT_CONCURRENCY = 4;
 
+const SUMMARY_BACKENDS = ["auto", "pi", "claude"];
+// Claude Code's --effort levels; "default" means no LogDig override.
+const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+const CLAUDE_MODEL_PATTERN = /^[A-Za-z0-9][\w.:[\]-]*$/;
+
 const ENVIRONMENT_SETTINGS = [
+  ["PI_JOURNAL_SUMMARY_BACKEND", "summaryBackend"],
+  ["PI_JOURNAL_CLAUDE_COMMAND", "claudeCommand"],
   ["PI_JOURNAL_DIR", "cacheDirectory"],
   ["PI_JOURNAL_DAILY_DIR", "dailyDirectory"],
   ["PI_JOURNAL_DAILY_HEADER", "dailyHeader"],
@@ -16,6 +23,7 @@ const ENVIRONMENT_SETTINGS = [
   ["PI_JOURNAL_THINKING", "thinkingLevel"],
   ["PI_JOURNAL_PI_COMMAND", "piCommand"],
   ["PI_CODING_AGENT_SESSION_DIR", "sessionDirectory"],
+  ["PI_JOURNAL_CLAUDE_SESSION_DIR", "claudeSessionDirectory"],
 ];
 
 function expandPath(value, home) {
@@ -47,7 +55,10 @@ function defaults({ env = process.env, home = homedir() } = {}) {
     dailySummary: "small",
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     sessionDirectory: path.join(expandPath(agentDirectory, home), "sessions"),
+    claudeSessionDirectory: undefined,
+    summaryBackend: "auto",
     piCommand: "pi",
+    claudeCommand: "claude",
     concurrency: DEFAULT_CONCURRENCY,
     autoCapture: false,
   };
@@ -89,21 +100,46 @@ export function validateSettings(settings, { requirePaths = false, home = homedi
     }
     if (settings[key]) settings[key] = expandPath(settings[key].trim(), home);
   }
+  // undefined finds Claude Code's default folder when it exists; false turns Claude Code history off.
+  if (settings.claudeSessionDirectory !== undefined && settings.claudeSessionDirectory !== false) {
+    if (typeof settings.claudeSessionDirectory !== "string" || !settings.claudeSessionDirectory.trim()) {
+      throw new Error("claudeSessionDirectory must be a non-empty path, or false to turn Claude Code history off");
+    }
+    settings.claudeSessionDirectory = expandPath(settings.claudeSessionDirectory.trim(), home);
+  }
+  if (settings.summaryBackend !== undefined) {
+    const backend = typeof settings.summaryBackend === "string" ? settings.summaryBackend.trim().toLowerCase() : "";
+    if (!SUMMARY_BACKENDS.includes(backend)) throw new Error("summaryBackend must be auto, pi, or claude");
+    settings.summaryBackend = backend;
+  }
+  // "auto" decides the backend when a summary starts, so a model is checked against its own format for now.
+  const claude = settings.summaryBackend === "claude";
+  const claudeModel = claude || (settings.summaryBackend === "auto" && !String(settings.model).includes("/"));
   if (settings.model !== undefined) {
-    if (typeof settings.model !== "string" || /[\r\n]/.test(settings.model)) throw new Error("model must use provider/model format");
-    settings.model = settings.model.trim();
-    const separator = settings.model.indexOf("/");
-    if (separator < 1 || separator === settings.model.length - 1) throw new Error("model must use provider/model format");
-    const provider = settings.model.slice(0, separator).trim();
-    const modelId = settings.model.slice(separator + 1).trim();
-    if (!provider || !modelId) throw new Error("model must use provider/model format");
-    settings.model = `${provider}/${modelId}`;
+    if (claudeModel) {
+      if (typeof settings.model !== "string" || !CLAUDE_MODEL_PATTERN.test(settings.model.trim())) {
+        throw new Error("model must be a Claude Code alias such as haiku or sonnet, or a full model name");
+      }
+      settings.model = settings.model.trim();
+    } else {
+      if (typeof settings.model !== "string" || /[\r\n]/.test(settings.model)) throw new Error("model must use provider/model format");
+      settings.model = settings.model.trim();
+      const separator = settings.model.indexOf("/");
+      if (separator < 1 || separator === settings.model.length - 1) throw new Error("model must use provider/model format");
+      const provider = settings.model.slice(0, separator).trim();
+      const modelId = settings.model.slice(separator + 1).trim();
+      if (!provider || !modelId) throw new Error("model must use provider/model format");
+      settings.model = `${provider}/${modelId}`;
+    }
   }
   if (settings.thinkingLevel !== undefined) {
     if (typeof settings.thinkingLevel !== "string") throw new Error("thinkingLevel must be default, off, minimal, low, medium, high, xhigh, or max");
     const level = settings.thinkingLevel.trim().toLowerCase();
     if (!["default", "off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(level)) {
       throw new Error("thinkingLevel must be default, off, minimal, low, medium, high, xhigh, or max");
+    }
+    if (claude && level !== "default" && !CLAUDE_EFFORT_LEVELS.includes(level)) {
+      throw new Error("With Claude Code, thinkingLevel must be default, low, medium, high, xhigh, or max");
     }
     settings.thinkingLevel = level === "default" ? undefined : level;
   }
@@ -118,14 +154,18 @@ export function validateSettings(settings, { requirePaths = false, home = homedi
   if (settings.autoCapture !== undefined && typeof settings.autoCapture !== "boolean") {
     throw new Error("autoCapture must be a boolean");
   }
-  if (typeof settings.piCommand !== "string" || !settings.piCommand.trim() || /[\r\n]/.test(settings.piCommand)) {
-    throw new Error("piCommand must be a command or executable path");
-  }
-  settings.piCommand = settings.piCommand.trim();
-  if (settings.piCommand === "~" || settings.piCommand.startsWith("~/")) {
-    settings.piCommand = expandPath(settings.piCommand, home);
-  } else if (settings.piCommand.includes("/") || settings.piCommand.includes("\\")) {
-    settings.piCommand = path.resolve(settings.piCommand);
+  settings.claudeCommand ??= "claude";
+  for (const key of ["piCommand", "claudeCommand"]) {
+    const command = settings[key];
+    if (typeof command !== "string" || !command.trim() || /[\r\n]/.test(command)) {
+      throw new Error(`${key} must be a command or executable path`);
+    }
+    settings[key] = command.trim();
+    if (settings[key] === "~" || settings[key].startsWith("~/")) {
+      settings[key] = expandPath(settings[key], home);
+    } else if (settings[key].includes("/") || settings[key].includes("\\")) {
+      settings[key] = path.resolve(settings[key]);
+    }
   }
   return settings;
 }
@@ -180,7 +220,10 @@ export async function saveSettings(settings, filePath = settings.filePath || set
     dailySummary: settings.dailySummary || "small",
     timeZone: settings.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     sessionDirectory: settings.sessionDirectory,
+    claudeSessionDirectory: settings.claudeSessionDirectory,
+    summaryBackend: settings.summaryBackend || "auto",
     piCommand: settings.piCommand || "pi",
+    claudeCommand: settings.claudeCommand || "claude",
     concurrency: settings.concurrency ?? DEFAULT_CONCURRENCY,
     autoCapture: settings.autoCapture === true,
     ...(settings.model ? { model: settings.model } : {}),
