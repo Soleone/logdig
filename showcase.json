@@ -5,7 +5,7 @@
   "kind": "cli",
   "year": 2026,
   "repo": "https://github.com/Soleone/logdig",
-  "live": "https://logdig-demo.vercel.app",
+  "live": "https://logdig.soleone.xyz",
   "media": {
     "hero": "docs/launch/assets/hero.png",
     "motion": "docs/launch/assets/demo.webp",
