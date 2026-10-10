@@ -1,0 +1,45 @@
+{
+  "project": "../..",
+  "pitch": "Your Pi history. A journal you can read. This is the real CLI, running in your browser on ten sample sessions.",
+  "mount": {
+    "node_modules/logdig": {
+      "from": "../..",
+      "include": [
+        "bin",
+        "src",
+        "package.json",
+        "README.md",
+        "LICENSE"
+      ]
+    },
+    ".": {
+      "from": "./home"
+    }
+  },
+  "env": {
+    "PATH": "~/bin:/usr/local/bin:/usr/bin:/bin"
+  },
+  "setup": [
+    "chmod +x bin/logdig bin/pi"
+  ],
+  "welcome": [
+    "\u001b[1mLogDig\u001b[0m turns saved Pi sessions into daily Markdown notes, grouped by project.",
+    "Ten sample sessions from the last two days are in ~/.pi/agent/sessions. Your journal is ~/vault.",
+    "",
+    "  logdig status                 what is journaled so far",
+    "  logdig backfill --dry-run     preview: dates, files, cache hits",
+    "  logdig backfill               journal them, four sessions at a time",
+    "  cat vault/Daily/*.md          read the result",
+    "",
+    "Or press the buttons above."
+  ],
+  "hints": [
+    "logdig status",
+    "logdig backfill --dry-run",
+    "logdig backfill",
+    "cat vault/Daily/*.md",
+    "logdig doctor",
+    "logdig help"
+  ],
+  "seed": "seed.js"
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "sessionDirectory": "/home/demo/.pi/agent/sessions",
+  "cacheDirectory": "/home/demo/vault/LogDig",
+  "dailyDirectory": "/home/demo/vault/Daily",
+  "dailyHeader": "# Projects",
+  "dailyHeaderAnchor": "",
+  "dailySummary": "small",
+  "timeZone": "UTC",
+  "piCommand": "pi",
+  "concurrency": 4,
+  "autoCapture": false
+}
