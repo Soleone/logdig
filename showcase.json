@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Soleone/showcase/main/schema/showcase.schema.json",
+  "title": "LogDig",
+  "pitch": "Your Pi history. A journal you can read.",
+  "kind": "cli",
+  "year": 2026,
+  "repo": "https://github.com/Soleone/logdig",
+  "live": "https://logdig-demo.vercel.app",
+  "media": {
+    "hero": "docs/launch/assets/hero.png",
+    "motion": "docs/launch/assets/demo.webp",
+    "video": "docs/launch/assets/demo.mp4",
+    "capture": "npm run demo:capture"
+  },
+  "demo": {
+    "strategy": "browser-terminal",
+    "local": "npm run demo",
+    "externals": [
+      {
+        "name": "LLM summaries via Pi",
+        "type": "model",
+        "seam": "piCommand setting (Pi JSON event stream)",
+        "standIn": "canned",
+        "note": "Sessions are synthetic and a stand-in for Pi returns canned summaries, so nothing is sent to a model."
+      }
+    ]
+  }
+}
