@@ -210,12 +210,12 @@ export async function writeSessions(modelClient, sessions, settings, range = {})
         const journalBlock = { ...block, continuationOf };
         const { prerequisite } = blockProgress;
         range.onProgress?.({ ...blockProgress, phase: "checking", status: "CHECKING" });
-        // A refresh rewrites the summaries for the selected days only, never for prerequisite blocks outside them.
-        const refresh = Boolean(range.refresh) && !prerequisite;
+        // --force rewrites the summaries for the selected days only, never for prerequisite blocks outside them.
+        const force = Boolean(range.force) && !prerequisite;
         const cached = range.dryRun
-          ? await inspectSessionSummary(modelClient, settings.cacheDirectory, journalBlock, { refresh })
+          ? await inspectSessionSummary(modelClient, settings.cacheDirectory, journalBlock, { force })
           : await saveSessionSummary(modelClient, settings.cacheDirectory, journalBlock, {
-            refresh,
+            force,
             onGenerate: () => range.onProgress?.({ ...blockProgress, phase: "summarizing", status: "SUMMARIZING" }),
           });
         if (cached.reused) summariesReused++;

@@ -265,11 +265,9 @@ export function enrichSessionNote(markdown, sourceFingerprint, metrics) {
   if (!note || note.sourceFingerprint !== sourceFingerprint) return markdown;
   const closing = markdown.match(/^---\n[\s\S]*?\n---\n/);
   let header = closing[0].slice(0, -4).replace(LEGACY_METRIC_LINE, "");
-  const usage = formatUsage({ ...note, ...metrics }) || note.sessionUsage;
-  if (usage) {
-    const line = `sessionUsage: ${JSON.stringify(usage)}\n`;
-    header = note.sessionUsage ? header.replace(/^sessionUsage: .*\n/gm, line) : header + line;
-  }
+  // Usage is recorded once. Metrics from later evidence never rewrite a saved sessionUsage line.
+  const usage = note.sessionUsage || formatUsage({ ...note, ...metrics });
+  if (usage && !note.sessionUsage) header += `sessionUsage: ${JSON.stringify(usage)}\n`;
   const updated = `${header}${markdown.slice(closing[0].length - 4)}`;
   return updated;
 }
@@ -292,7 +290,6 @@ export function renderSessionNote(session, summary, cacheFingerprint, model, log
     `cwd: ${frontmatterValue(session.header.cwd || "")}`,
     `sourceFingerprint: ${frontmatterValue(session.sourceFingerprint)}`,
     `cacheFingerprint: ${frontmatterValue(cacheFingerprint)}`,
-    ...(session.generationFingerprint ? [`generationFingerprint: ${frontmatterValue(session.generationFingerprint)}`] : []),
     `summaryVersion: ${frontmatterValue(SUMMARY_VERSION)}`,
     `model: ${frontmatterValue(model)}`,
     ...(sessionUsage ? [`sessionUsage: ${JSON.stringify(sessionUsage)}`] : []),
@@ -346,63 +343,39 @@ function updateContinuationReference(markdown, continuationOf) {
   return header + (continuationOf ? `\nContinues [[${continuationOf}|previous entry]].\n` : "") + body;
 }
 
-function sourceFingerprintForProject(session, project) {
-  const events = [...(session.context || []), ...(session.events || [])];
-  if (events.some((event) => event.project !== session.project)) return undefined;
-  const relabel = (items) => items.map((event) => ({ ...event, project }));
-  return hashValue([
-    project,
-    session.timezone,
-    relabel(session.context || []),
-    relabel(session.events || []),
-  ]);
-}
-
 function modelLabelWithThinking(modelClient) {
   const model = modelClient.modelLabel || "Pi default";
   const thinkingLevel = modelClient.cachePolicy?.thinkingLevel;
   return thinkingLevel === undefined ? model : `${model}:${thinkingLevel}`;
 }
 
-export async function inspectSessionSummary(modelClient, cacheDirectory, session, { refresh = false } = {}) {
+export async function inspectSessionSummary(modelClient, cacheDirectory, session, { force = false } = {}) {
   const sourceFingerprint = hashValue([session.project, session.timezone, session.context || [], session.events]);
-  // A summary is reused while its evidence and its model and thinking settings are unchanged.
-  // Prompt and format versions do not invalidate it. An upgrade keeps existing summaries until
-  // a refresh asks for them to be rewritten.
+  // A saved summary is kept as written. Later changes to its evidence, model, thinking level, or
+  // prompt version do not rewrite it. Only a forced rewrite does, and missing summaries are created.
   const policy = Object.entries(modelClient.cachePolicy || { model: "Pi default" }).sort(([left], [right]) => left.localeCompare(right));
-  const generationFingerprint = hashValue([policy]);
   const cacheFingerprint = hashValue([SUMMARY_VERSION, JOURNAL_SYSTEM_PROMPT, CHUNK_LIMIT, sourceFingerprint, policy]);
   const suffix = session.blockIndex > 0 ? `-${session.blockId}` : "";
   const sessionPath = path.join(cacheDirectory, "Sessions", `${safeFileName(session.header.id)}${suffix}.md`);
   const cached = await readMarkdownIfPresent(sessionPath);
   const existing = cached && parseSessionNote(cached);
-  // Notes written before generationFingerprint existed match on the model label they recorded.
-  const generationMatches = (note) => note.generationFingerprint
-    ? note.generationFingerprint === generationFingerprint
-    : note.model === modelLabelWithThinking(modelClient);
-
-  const reused = Boolean(existing) && !refresh && existing.sourceFingerprint === sourceFingerprint && generationMatches(existing);
-  const previousSourceFingerprint = existing?.project && existing.project !== session.project
-    ? sourceFingerprintForProject(session, existing.project)
-    : undefined;
-  const relabeledReuse = Boolean(existing) && !refresh && !reused && previousSourceFingerprint !== undefined &&
-    previousSourceFingerprint === existing.sourceFingerprint && generationMatches(existing);
-  const reusable = reused || relabeledReuse;
+  const reused = Boolean(existing) && !force;
   return {
     sessionPath,
-    sourceFingerprint: reusable ? existing.sourceFingerprint : sourceFingerprint,
-    cacheFingerprint: reusable ? existing.cacheFingerprint : cacheFingerprint,
-    generationFingerprint: reusable && existing.generationFingerprint ? existing.generationFingerprint : generationFingerprint,
-    reused: reusable,
+    sourceFingerprint: reused ? existing.sourceFingerprint : sourceFingerprint,
+    cacheFingerprint: reused ? existing.cacheFingerprint : cacheFingerprint,
+    reused,
     continuationOf: existing?.continuationOf,
-    summary: reusable ? existing.summary : undefined,
+    summary: reused ? existing.summary : undefined,
   };
 }
 
-export async function saveSessionSummary(modelClient, cacheDirectory, session, { onGenerate, refresh = false } = {}) {
-  const cached = await inspectSessionSummary(modelClient, cacheDirectory, session, { refresh });
+export async function saveSessionSummary(modelClient, cacheDirectory, session, { onGenerate, force = false } = {}) {
+  const cached = await inspectSessionSummary(modelClient, cacheDirectory, session, { force });
   if (cached.reused) {
     const markdown = await readFile(cached.sessionPath, "utf8");
+    // A kept summary keeps its summary and usage. Usage is filled in only when the note has none,
+    // and legacy metric fields are migrated.
     let enriched = enrichSessionNote(markdown, cached.sourceFingerprint, sessionMetrics(session));
     const continuation = session.continuationOf;
     const existingContinuation = parseSessionNote(enriched).continuationOf;
@@ -421,7 +394,6 @@ export async function saveSessionSummary(modelClient, cacheDirectory, session, {
   const markdown = renderSessionNote({
     ...session,
     sourceFingerprint: cached.sourceFingerprint,
-    generationFingerprint: cached.generationFingerprint,
   }, summary, cacheFingerprint, modelLabelWithThinking(modelClient), logMetrics);
   await writeAtomically(sessionPath, markdown);
   return { ...cached, summary, continuationOf: session.continuationOf, reused: false };

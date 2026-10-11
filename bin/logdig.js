@@ -155,12 +155,11 @@ async function doctor() {
 
 async function backfill(args) {
   const settings = await loadSettings();
-  const backendName = await resolveSummaryBackend(settings);
-  const backend = summaryBackendFor({ summaryBackend: backendName });
   let daysArgument;
   let dryRun = false;
   let skipToday = false;
-  let refresh = false;
+  let force = false;
+  let selectedAgent;
   let selectedModel = settings.model;
   let selectedThinking = settings.thinkingLevel;
   for (let index = 0; index < args.length; index++) {
@@ -169,11 +168,17 @@ async function backfill(args) {
       dryRun = true;
     } else if (arg === "--skip-today") {
       skipToday = true;
-    } else if (arg === "--refresh") {
-      refresh = true;
+    } else if (arg === "--force") {
+      force = true;
+    } else if (arg === "--agent") {
+      selectedAgent = args[++index];
+      if (!selectedAgent || selectedAgent.startsWith("-")) throw new Error("--agent requires auto, pi, or claude");
+    } else if (arg.startsWith("--agent=")) {
+      selectedAgent = arg.slice("--agent=".length);
     } else if (arg === "--model" || arg === "-m") {
       selectedModel = args[++index];
-      if (!selectedModel || selectedModel.startsWith("-")) throw new Error(`--model requires ${backend.modelHint}, or 'default' for ${backend.label}'s default model`);
+      const hint = summaryBackendFor({ summaryBackend: selectedAgent || settings.summaryBackend });
+      if (!selectedModel || selectedModel.startsWith("-")) throw new Error(`--model requires ${hint.modelHint}, or 'default' for ${hint.label}'s default model`);
     } else if (arg.startsWith("--model=")) {
       selectedModel = arg.slice("--model=".length);
     } else if (arg === "--thinking") {
@@ -187,6 +192,13 @@ async function backfill(args) {
       throw new Error(`Unknown backfill argument: ${arg}. Run '${commandName} backfill --help'.`);
     }
   }
+  // --agent chooses Pi or Claude Code for this run only. The saved summaryBackend is left unchanged.
+  if (selectedAgent !== undefined) {
+    selectedAgent = selectedAgent.trim().toLowerCase();
+    if (!["auto", "pi", "claude"].includes(selectedAgent)) throw new Error("--agent requires auto, pi, or claude");
+  }
+  const backendName = await resolveSummaryBackend({ ...settings, summaryBackend: selectedAgent || settings.summaryBackend });
+  const backend = summaryBackendFor({ summaryBackend: backendName });
   selectedModel = selectedModel?.trim().toLowerCase() === "default" ? undefined : selectedModel;
   const generationSettings = validateSettings({ ...settings, summaryBackend: backendName, model: selectedModel, thinkingLevel: selectedThinking });
   selectedModel = generationSettings.model;
@@ -197,12 +209,16 @@ async function backfill(args) {
   console.log(`${dryRun ? "Preview" : "Backfill"}: ${range.all ? "all saved sessions" : `last ${range.days}${skipToday ? " complete" : ""} day${range.days === 1 ? "" : "s"}`} (${settings.timeZone})${skipToday ? " · skipping today" : ""}`);
   console.log(`Daily notes: ${settings.dailyDirectory} (${settings.dailyHeader}, ${settings.dailySummary})`);
   console.log(`Summary cache: ${path.join(settings.cacheDirectory, "Sessions")}`);
+  console.log(`Agent: ${backend.label}${selectedAgent ? " (from --agent)" : ""}`);
   console.log(`Model: ${selectedModel || backend.defaultModelLabel}`);
   console.log(`Thinking: ${selectedThinking || backend.defaultModelLabel}`);
   console.log(`Parallel sessions: ${settings.concurrency}`);
+  console.log(force
+    ? "Existing summaries: rewritten for the selected days (--force)."
+    : "Existing summaries: kept. Only missing summaries need model requests.");
   console.log(dryRun
     ? "Dry run: no model requests, no file changes, and no folders created."
-    : `Only new or changed work blocks need summarizing. Selected, redacted history is sent to your ${backend.label} model; provider charges may apply.`);
+    : `Selected, redacted history is sent to your ${backend.label} model for missing summaries; provider charges may apply.`);
   const found = await collectSessions({ sessionDirectory: settings.sessionDirectory, claudeSessionDirectory: await claudeHistoryDirectory(settings), timeZone: settings.timeZone, days: range.days, skipToday });
   console.log(`\nFound ${found.sessions.length} saved session${found.sessions.length === 1 ? "" : "s"}${found.firstDate ? ` to check for ${found.firstDate} through ${found.lastDate}` : skipToday ? ` to check through ${found.lastDate}` : ""}.`);
   if (found.sessions.length === 0) {
@@ -232,7 +248,7 @@ async function backfill(args) {
   let result;
   try {
     result = await writeSessions(createSummaryClient(generationSettings), found.sessions, settings, {
-      ...found, dryRun, refresh, onProgress: progress.onProgress, onSessionComplete: progress.onSessionComplete,
+      ...found, dryRun, force, onProgress: progress.onProgress, onSessionComplete: progress.onSessionComplete,
     });
   } finally {
     cleanupProgress();
@@ -261,7 +277,7 @@ async function backfill(args) {
     console.warn(dryRun ? "Preview incomplete. Fix the issues above, then preview again." : "Some sessions could not be saved. Successful summaries are cached. Fix the issues above and rerun the same command to retry.");
     process.exitCode = 1;
   } else if (dryRun && result.dates.length) {
-    console.log(`\nWhen you're ready: ${commandName} backfill ${range.all ? "all" : range.days}${skipToday ? " --skip-today" : ""}${selectedModel ? ` --model ${selectedModel}` : settings.model ? " --model default" : ""}${selectedThinking ? ` --thinking ${selectedThinking}` : settings.thinkingLevel ? " --thinking default" : ""}`);
+    console.log(`\nWhen you're ready: ${commandName} backfill ${range.all ? "all" : range.days}${skipToday ? " --skip-today" : ""}${force ? " --force" : ""}${selectedAgent ? ` --agent ${selectedAgent}` : ""}${selectedModel ? ` --model ${selectedModel}` : settings.model ? " --model default" : ""}${selectedThinking ? ` --thinking ${selectedThinking}` : settings.thinkingLevel ? " --thinking default" : ""}`);
   }
 }
 
@@ -308,7 +324,6 @@ async function status(args) {
     .map((session) => {
       const previous = (previousEntries.get(session.sessionId) || []).filter((entry) => entry.blockId === session.blockId);
       const status = session.entryPresent ? "logged" : previous.length ? "stale" : "new";
-      const summaryChanged = previous.length && !previous.some((entry) => entry.cacheFingerprint === session.cacheFingerprint);
       return {
         sessionId: session.sessionId,
         blockId: session.blockId,
@@ -320,9 +335,7 @@ async function status(args) {
         ...(session.continuationOf ? { continuationOf: session.continuationOf } : {}),
         status,
         ...(status === "stale" ? {
-          reason: session.legacyEntry
-            ? "previous entry needs work-block migration"
-            : summaryChanged ? "work-block evidence or generation policy changed" : "previous journal entry is not current",
+          reason: session.legacyEntry ? "previous entry needs work-block migration" : "previous journal entry is not current",
         } : {}),
         summaryStatus: session.summaryReused ? "reusable" : "needs-summarizing",
         dailyPath: session.dailyPath,
@@ -404,8 +417,11 @@ function helpText() {
     "  logdig init                         guided setup; nothing is summarized",
     "  logdig doctor                       check paths and Pi without a model request",
     "  logdig config                       edit numbered settings; q quits (redirected: read-only)",
-    "  logdig backfill [N|all] [--dry-run] [--skip-today] [--refresh]",
-    "                                      --refresh rewrites summaries for the selected days",
+    "  logdig backfill [N|all] [--dry-run] [--skip-today] [--force]",
+    "                                      saves missing summaries; existing ones are kept",
+    "                                      --force rewrites saved summaries for the selected days",
+    "                                      [--agent auto|pi|claude]",
+    "                                      --agent picks Pi or Claude Code for this run only",
     "                                      [--model provider/model|default]",
     "                                      [--thinking default|off|minimal|low|medium|high|xhigh|max]",
     "                                      journal saved sessions (default: last 3 days)",

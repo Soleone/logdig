@@ -44,7 +44,7 @@ function session(id, project, time, sourceFingerprint) {
   };
 }
 
-test("default model caches remain compatible while explicit model choices get separate summaries", async () => {
+test("explicit model choices keep existing summaries until a forced rewrite uses the selected model", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "logdig-model-cache-"));
   const { modelClient, calls } = modelContext();
   const first = session("session-model", "alpha", "09:00", "same-source");
@@ -52,10 +52,11 @@ test("default model caches remain compatible while explicit model choices get se
     const initial = await saveSessionSummary({ ...modelClient, cachePolicy: { model: "Pi default" } }, root, first);
     assert.equal(initial.reused, false);
     const selected = { ...modelClient, modelLabel: "test/other", cachePolicy: { model: "test/other" } };
-    const switched = await saveSessionSummary(selected, root, first);
-    assert.equal(switched.reused, false);
-    const repeated = await saveSessionSummary(selected, root, first);
-    assert.equal(repeated.reused, true);
+    const kept = await saveSessionSummary(selected, root, first);
+    assert.equal(kept.reused, true);
+    assert.equal(calls(), 1);
+    const forced = await saveSessionSummary(selected, root, first, { force: true });
+    assert.equal(forced.reused, false);
     assert.equal(calls(), 2);
   } finally {
     await rm(root, { recursive: true, force: true });

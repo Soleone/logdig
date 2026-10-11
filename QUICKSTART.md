@@ -55,7 +55,7 @@ logdig backfill 14 --skip-today
 logdig backfill 30 --skip-today
 ```
 
-This selects complete calendar days through yesterday in your timezone and excludes whole work periods that continued today. Earlier periods in the same session can still be logged. Each wider run reuses unchanged summaries. The flag also works with `backfill all` and `status`.
+This selects complete calendar days through yesterday in your timezone and excludes whole work periods that continued today. Earlier periods in the same session can still be logged. Each wider run keeps saved summaries and creates only the missing ones. The flag also works with `backfill all` and `status`.
 
 If no history is found at all, start a saved Pi or Claude Code session, or select the right history folder in the wizard's advanced settings. `doctor` shows which history folders and summary backend LogDig is using.
 
@@ -67,17 +67,17 @@ Once the preview looks right, run the same range without `--dry-run`:
 logdig backfill 1
 ```
 
-To override the model and thinking level for one run, use `logdig backfill 1 --model provider/model --thinking max`. Use `--thinking default` to ignore a saved thinking override. More thinking may improve factual reconstruction, but can increase latency and token cost; available effort depends on the model. Saved thinking preferences also apply to `/journal` and automatic capture.
+To override the model and thinking level for one run, use `logdig backfill 1 --model provider/model --thinking max`. Add `--agent claude` to summarize with Claude Code for that run, for example `logdig backfill 1 --agent claude --model haiku --thinking high`. The saved agent setting does not change. Use `--thinking default` to ignore a saved thinking override. More thinking may improve factual reconstruction, but can increase latency and token cost; available effort depends on the model. Saved thinking preferences also apply to `/journal` and automatic capture.
 
 This may send selected, redacted history to your summary model and incur provider charges. Pi uses its existing authentication, and Claude Code uses your `claude` login. If authentication fails, run `/login` in Pi or `claude`, then retry. Common secrets are redacted, but redaction is not a complete secret scanner.
 
 Open the daily-note date printed by the command. You will find project subheadings under `# Projects`, with timestamped summaries grouped beneath each one. Your existing text stays in place. Click a timestamp to open that entry's saved snapshot of all three summary lengths, or browse `<cache folder>/Sessions/` for the latest work-block summaries. Snapshots written from now on include `agent: pi` or `agent: claude-code` in their front matter.
 
-Repeating unchanged work reuses its summary and does not insert that entry again. Session renames and other bookkeeping do not trigger regeneration. New work in the same block updates that block's row; continuation blocks get separate linked entries. Manually edited blurbs and older snapshots in `Entries/` are preserved. Run only one save at a time against your journal, and let vault sync finish first.
+Repeating a run keeps saved summaries and does not insert their entries again. New messages in a session that already has a summary do not change that summary until you run with `--force`. Work that starts a new block gets its own summary and a linked entry. Manually edited blurbs and older snapshots in `Entries/` are preserved. Run only one save at a time against your journal, and let vault sync finish first.
 
-If you used the older whole-session journal format, the first real save regenerates summaries for selected work blocks and migrates the old rows while keeping their linked snapshots. Preview before saving to check the dates and model work.
+If you used the older whole-session journal format, the first real save migrates the old rows to their work blocks and keeps their linked snapshots. Their summaries stay as they are unless you run with `--force`. Preview before saving to check the dates and model work.
 
-Existing summaries are kept when LogDig upgrades. A summary is regenerated only when its source changes, or when you change the model or thinking level. To rewrite summaries after an upgrade, run `logdig backfill N --refresh` for the days you want refreshed, and preview it with `--dry-run` first.
+Existing summaries are kept when LogDig upgrades, and when you change the model or thinking level. LogDig never regenerates a saved summary on its own. To rewrite summaries after an upgrade or a settings change, run `logdig backfill N --force` for the days you want rewritten, and preview it with `--dry-run` first. To use another model or thinking level for missing summaries only, pass `--model` and `--thinking` without `--force`.
 
 ## Optional: use `/journal` inside Pi
 

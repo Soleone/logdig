@@ -25,7 +25,7 @@ function runCli(args, env) {
   });
 }
 
-test("backfill --refresh regenerates the selected days, and a plain rerun reuses them", { skip: process.platform === "win32" }, async (t) => {
+test("backfill --force regenerates the selected days; plain reruns and thinking changes keep saved summaries", { skip: process.platform === "win32" }, async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "logdig-refresh-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const callsPath = path.join(root, "calls.txt");
@@ -61,11 +61,15 @@ process.stdin.on("end", () => {
   const rerun = await runCli(["backfill", "3", "--dry-run"], env);
   assert.match(rerun.stdout, /Would create 0 summaries, reuse 1/);
 
-  const refresh = await runCli(["backfill", "3", "--dry-run", "--refresh"], env);
-  assert.equal(refresh.code, 0, refresh.stderr);
-  assert.match(refresh.stdout, /Would create 1 summary, reuse 0/);
+  const thinking = await runCli(["backfill", "3", "--dry-run", "--thinking", "low"], env);
+  assert.equal(thinking.code, 0, thinking.stderr);
+  assert.match(thinking.stdout, /Would create 0 summaries, reuse 1/);
 
-  const saved = await runCli(["backfill", "3", "--refresh"], env);
+  const forced = await runCli(["backfill", "3", "--dry-run", "--force"], env);
+  assert.equal(forced.code, 0, forced.stderr);
+  assert.match(forced.stdout, /Would create 1 summary, reuse 0/);
+
+  const saved = await runCli(["backfill", "3", "--force"], env);
   assert.equal(saved.code, 0, saved.stderr);
   assert.match(saved.stdout, /Saved: 1 summary created/);
 });

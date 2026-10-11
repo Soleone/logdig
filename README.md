@@ -12,7 +12,7 @@ Turn saved [Pi](https://pi.dev) and Claude Code sessions into daily Markdown not
 
 - **Catch up in parallel.** Four independent sessions at once by default, with live progress and configurable concurrency.
 - **Short here, detailed there.** Every work block gets Small, Medium, and Large summaries. Your daily note links to the saved detail.
-- **Keep your own writing.** Handwritten notes and manually edited daily blurbs stay in place. Unchanged summaries are reused instead of requested again.
+- **Keep your own writing.** Handwritten notes and manually edited daily blurbs stay in place. Saved summaries are kept as written. LogDig never rewrites one unless you ask with `--force`.
 - **One journal for both tools.** Pi and Claude Code sessions go into the same notes, grouped by project. Each entry's details say which tool it came from.
 - **Pick up where you left off.** Continuous overnight work stays together. Returning the next day after a long break creates a linked continuation.
 

@@ -92,7 +92,7 @@ test("journal passes every explicit thinking level through provider-neutral requ
   }
 });
 
-test("configured thinking and model apply to chunk extraction, final synthesis, backfill, and shutdown", async (t) => {
+test("configured thinking and model apply to chunk extraction, final synthesis, backfill, and forced rewrites", async (t) => {
   const f = await extensionFixture(t, { model: "test/cheap", thinkingLevel: "max", autoCapture: true });
   const selected = { provider: "test", id: "cheap" };
   f.ctx.modelRegistry.find = (provider, id) => {
@@ -120,6 +120,8 @@ test("configured thinking and model apply to chunk extraction, final synthesis, 
   assert.equal(f.model.calls, count);
   f.entries.push({ type: "message", timestamp: started + 13_000, message: { role: "user", content: "Record the follow-up." } });
   await f.shutdown({}, f.ctx);
+  assert.equal(f.model.calls, count, "automatic capture keeps the saved summary");
+  await f.command("--force", f.ctx);
   assert.ok(f.model.calls > count);
   for (const { method, args: [model, _context, options] } of f.model.requests) {
     assert.equal(method, "streamSimple");
@@ -128,7 +130,9 @@ test("configured thinking and model apply to chunk extraction, final synthesis, 
   }
   await saveSettings({ ...f.settings, thinkingLevel: "high" }, path.join(f.root, "settings.json"));
   await f.command("backfill 1 --dry-run", f.ctx);
-  assert.match(f.notifications.at(-1).message, /would create 1 summary/);
+  assert.match(f.notifications.at(-1).message, /would create 0 summaries, reuse 1/);
+  await f.command("backfill 1 --dry-run --force", f.ctx);
+  assert.match(f.notifications.at(-1).message, /would create 1 summary, reuse 0/);
 });
 
 test("default thinking preserves existing provider requests instead of inheriting session effort", async (t) => {
@@ -245,4 +249,12 @@ test("shutdown capture reports per-session failures instead of silently swallowi
   assert.match(errors.join("\n"), /logdig doctor/);
   assert.equal(f.statuses.at(-1).text, undefined);
   await assert.rejects(readdir(f.settings.dailyDirectory), { code: "ENOENT" });
+});
+
+test("/journal rejects --agent because it always uses Pi", async (t) => {
+  const f = await extensionFixture(t);
+  await f.command("backfill 1 --agent claude", f.ctx);
+  assert.equal(f.notifications.at(-1).level, "error");
+  assert.match(f.notifications.at(-1).message, /always uses Pi/);
+  assert.equal(f.model.calls, 0);
 });

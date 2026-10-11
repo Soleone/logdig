@@ -146,3 +146,12 @@ test("settings reject invalid summary levels, headings, and model references", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("Claude Code thinking levels are limited to the efforts it accepts", () => {
+  const required = { cacheDirectory: "/cache", dailyDirectory: "/daily", dailyHeader: "# Projects", piCommand: "pi", timeZone: "UTC" };
+  for (const level of ["off", "minimal"]) {
+    assert.throws(() => validateSettings({ ...required, summaryBackend: "claude", thinkingLevel: level }), /With Claude Code, thinkingLevel must be/);
+  }
+  assert.equal(validateSettings({ ...required, summaryBackend: "claude", thinkingLevel: "xhigh" }).thinkingLevel, "xhigh");
+  assert.equal(validateSettings({ ...required, summaryBackend: "auto", thinkingLevel: "minimal" }).thinkingLevel, "minimal");
+});

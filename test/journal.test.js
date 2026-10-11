@@ -157,7 +157,7 @@ test("chunked prompts preserve date changes even if the model digest loses dates
   assert.match(prompts.at(-1), /attached to the action or result they record/);
 });
 
-test("prompt and format version changes keep existing summaries until a refresh asks for them", async (t) => {
+test("prompt and format version changes keep existing summaries until a forced rewrite asks for them", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "logdig-prompt-version-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const client = { cachePolicy: { model: "Pi default" }, complete: async () => JSON.stringify(summary) };
@@ -176,19 +176,34 @@ test("prompt and format version changes keep existing summaries until a refresh 
   assert.equal(inspected.summary.small, summary.small);
   assert.equal(inspected.cacheFingerprint, oldFingerprint, "the note keeps its entry identity");
 
-  const refreshed = await inspectSessionSummary(client, root, session, { refresh: true });
-  assert.equal(refreshed.reused, false, "--refresh regenerates even when the note is current");
+  const forced = await inspectSessionSummary(client, root, session, { force: true });
+  assert.equal(forced.reused, false, "--force regenerates even when the note is current");
 });
 
-test("notes from before generation fingerprints reuse when their model and thinking still match, and regenerate when thinking changes", async (t) => {
+test("saved notes survive model and thinking changes, and only a forced rewrite regenerates them", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "logdig-legacy-note-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const client = { cachePolicy: { model: "Pi default" }, modelLabel: "Pi startup default", complete: async () => JSON.stringify(summary) };
   const current = await saveSessionSummary(client, root, session);
-  const legacy = (await readFile(current.sessionPath, "utf8")).replace(/^generationFingerprint: .*\n/m, "");
-  await writeFile(current.sessionPath, legacy);
-
   assert.equal((await inspectSessionSummary(client, root, session)).reused, true);
   const withThinking = { ...client, cachePolicy: { model: "Pi default", thinkingLevel: "high" } };
-  assert.equal((await inspectSessionSummary(withThinking, root, session)).reused, false, "a thinking change still regenerates");
+  const kept = await inspectSessionSummary(withThinking, root, session);
+  assert.equal(kept.reused, true, "a thinking change keeps the saved note");
+  assert.equal(kept.cacheFingerprint, current.cacheFingerprint);
+  assert.equal((await inspectSessionSummary(withThinking, root, session, { force: true })).reused, false);
+});
+
+test("changed session evidence keeps the saved summary until a forced rewrite", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "logdig-evidence-note-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = { cachePolicy: { model: "Pi default" }, complete: async () => JSON.stringify(summary) };
+  await saveSessionSummary(client, root, session);
+  const grown = {
+    ...session,
+    events: [{ date: "2026-09-27", time: "11:00", project: "demo", sessionId: "01-session", kind: "user intent", text: "A follow-up after the note was saved." }],
+  };
+  const kept = await inspectSessionSummary(client, root, grown);
+  assert.equal(kept.reused, true);
+  assert.equal(kept.summary.small, summary.small);
+  assert.equal((await inspectSessionSummary(client, root, grown, { force: true })).reused, false);
 });

@@ -309,7 +309,7 @@ test("a dry run reports project, date, output file, and new summaries without ca
   await assert.rejects(readdir(w.settings.dailyDirectory), { code: "ENOENT" });
 });
 
-test("status reports new, logged, and stale work blocks without writes or model calls", async (t) => {
+test("status reports new and logged work blocks without writes or model calls, and keeps saved summaries", async (t) => {
   const w = await workspace(t);
   const date = await addSession(w.settings);
   const missing = await runCli(["status", "1", "--json"], w.env);
@@ -345,14 +345,17 @@ test("status reports new, logged, and stale work blocks without writes or model 
   const changed = await runCli(["status", "1", "--json"], w.env);
   assert.equal(changed.code, 0, changed.stderr);
   const changedReport = JSON.parse(changed.stdout);
-  assert.equal(changedReport.sessions[0].status, "stale");
-  assert.match(changedReport.sessions[0].reason, /evidence or generation policy changed/);
-  assert.equal(changedReport.sessions[0].summaryStatus, "needs-summarizing");
+  assert.equal(changedReport.sessions[0].status, "logged");
+  assert.equal(changedReport.sessions[0].summaryStatus, "reusable");
+  assert.equal(changedReport.totals.needsSummarizing, 0);
   assert.equal(await readFile(dailyPath, "utf8"), dailyBefore);
   assert.equal((await calls(w.callsPath)).length, 1);
+  const forced = await runCli(["backfill", "1", "--force"], w.env);
+  assert.equal(forced.code, 0, forced.stderr);
+  assert.equal((await calls(w.callsPath)).length, 2);
 });
 
-test("CLI status distinguishes overnight stale work from a new continuation and ignores bookkeeping changes", async (t) => {
+test("CLI status reports a new continuation and keeps saved overnight summaries", async (t) => {
   const w = await workspace(t);
   const today = new Date().toISOString().slice(0, 10);
   const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86400_000).toISOString().slice(0, 10);
@@ -370,9 +373,9 @@ test("CLI status distinguishes overnight stale work from a new continuation and 
   const status = await runCli(["status", "1", "--json"], w.env);
   assert.equal(status.code, 0, status.stderr);
   const report = JSON.parse(status.stdout);
-  assert.deepEqual(report.sessions.map((block) => [block.date, block.status]), [[yesterday, "stale"], [today, "new"]]);
+  assert.deepEqual(report.sessions.map((block) => [block.date, block.status]), [[yesterday, "logged"], [today, "new"]]);
   assert.equal(new Set(report.sessions.map((block) => block.blockId)).size, 2);
-  assert.equal(report.totals.needsSummarizing, 2);
+  assert.equal(report.totals.needsSummarizing, 1);
   assert.equal((await calls(w.callsPath)).length, 1);
   assert.equal(await readFile(dailyPath, "utf8"), before);
   assert.equal((await runCli(["backfill", "1"], w.env)).code, 0);
@@ -387,7 +390,7 @@ test("CLI status distinguishes overnight stale work from a new continuation and 
   const unchanged = JSON.parse((await runCli(["status", "1", "--json"], w.env)).stdout);
   assert.equal(unchanged.totals.logged, 2);
   assert.equal(unchanged.totals.needsSummarizing, 0);
-  assert.equal((await calls(w.callsPath)).length, 3);
+  assert.equal((await calls(w.callsPath)).length, 2);
 });
 
 test("CLI status and preview expose missing continuation prerequisites without generating or writing summaries", async (t) => {
@@ -642,7 +645,7 @@ test("redirected CLI reports active summarization before the model finishes", as
   assert.doesNotMatch(result.stdout, /\x1b/);
 });
 
-test("CLI backfill updates an evolving session row and keeps a hand-edited blurb", async (t) => {
+test("CLI backfill keeps a saved row until --force updates it, and keeps a hand-edited blurb", async (t) => {
   const w = await workspace(t);
   const date = await addSession(w.settings);
   const first = await runCli(["backfill", "1"], w.env);
@@ -661,7 +664,12 @@ test("CLI backfill updates an evolving session row and keeps a hand-edited blurb
     message: { role: "user", content: "Add a follow-up to this same session." },
   });
   await writeFile(sessionPath, `${(await readFile(sessionPath, "utf8")).trimEnd()}\n${followup}\n`);
-  const updated = await runCli(["backfill", "1"], w.env);
+  const kept = await runCli(["backfill", "1"], w.env);
+  assert.equal(kept.code, 0, kept.stderr);
+  assert.match(kept.stdout, /updated 0 entries/);
+  assert.match(await readFile(dailyPath, "utf8"), /My edited summary\./);
+  assert.equal((await calls(w.callsPath)).length, 1);
+  const updated = await runCli(["backfill", "1", "--force"], w.env);
   assert.equal(updated.code, 0, updated.stderr);
   assert.match(updated.stdout, /updated 1 entry/);
   const daily = await readFile(dailyPath, "utf8");
@@ -745,22 +753,24 @@ test("CLI thinking overrides are validated, previewed, passed to Pi, and do not 
   assert.equal(saved.thinkingLevel, "high");
 });
 
-test("thinking settings affect cache freshness, status, environment reporting, and can be cleared for one run", async (t) => {
+test("thinking settings keep saved summaries, affect previews and forced rewrites, and can be cleared for one run", async (t) => {
   const w = await workspace(t);
   await addSession(w.settings);
   assert.equal((await runCli(["backfill", "1"], w.env)).code, 0);
   await saveSettings({ ...w.settings, thinkingLevel: "max" }, w.filePath);
   const report = JSON.parse((await runCli(["status", "1", "--json"], w.env)).stdout);
-  assert.equal(report.totals.stale, 1);
-  assert.equal(report.totals.needsSummarizing, 1);
+  assert.equal(report.totals.logged, 1);
+  assert.equal(report.totals.needsSummarizing, 0);
   const preview = await runCli(["backfill", "1", "--dry-run"], w.env);
   assert.match(preview.stdout, /Thinking: max/);
-  assert.match(preview.stdout, /Would create 1 summary, reuse 0/);
+  assert.match(preview.stdout, /Would create 0 summaries, reuse 1/);
+  const forced = await runCli(["backfill", "1", "--dry-run", "--force"], w.env);
+  assert.match(forced.stdout, /Would create 1 summary, reuse 0/);
   const cleared = await runCli(["backfill", "1", "--dry-run", "--thinking", "default"], w.env);
   assert.match(cleared.stdout, /Thinking: Pi startup default/);
   assert.match(cleared.stdout, /Would create 0 summaries, reuse 1/);
   assert.match(cleared.stdout, /When you're ready: .* --thinking default/);
-  const actual = await runCli(["backfill", "1", "--thinking=default", "--model=test/other"], w.env);
+  const actual = await runCli(["backfill", "1", "--force", "--thinking=default", "--model=test/other"], w.env);
   assert.equal(actual.code, 0, actual.stderr);
   assert.equal((await calls(w.callsPath))[1].includes("--thinking"), false);
   const env = { ...w.env, PI_JOURNAL_THINKING: "off" };
@@ -769,13 +779,35 @@ test("thinking settings affect cache freshness, status, environment reporting, a
   assert.match(config.stdout, /Environment overrides: PI_JOURNAL_THINKING/);
   const doctor = await runCli(["doctor"], env);
   assert.match(doctor.stdout, /Thinking: off/);
-  const overridden = await runCli(["backfill", "1"], env);
+  const overridden = await runCli(["backfill", "1", "--force"], env);
   assert.equal(overridden.code, 0, overridden.stderr);
   const args = (await calls(w.callsPath)).at(-1);
   assert.equal(args[args.indexOf("--thinking") + 1], "off");
   const repeated = await runCli(["backfill", "1"], env);
   assert.match(repeated.stdout, /0 summaries created, 1 reused/);
   assert.equal((await loadSettings({ filePath: w.filePath, env: {} })).thinkingLevel, "max");
+});
+
+test("--agent picks Pi or Claude Code for one run, checks the model and thinking against it, and keeps saved settings", async (t) => {
+  const w = await workspace(t);
+  await addSession(w.settings);
+  const before = await readFile(w.filePath, "utf8");
+  const claude = await runCli(["backfill", "1", "--dry-run", "--agent", "claude", "--model", "haiku"], w.env);
+  assert.equal(claude.code, 0, claude.stderr);
+  assert.match(claude.stdout, /Agent: Claude Code \(from --agent\)/);
+  assert.match(claude.stdout, /Model: haiku/);
+  assert.match(claude.stdout, /When you're ready: .* --agent claude --model haiku/);
+  const wrongModel = await runCli(["backfill", "1", "--dry-run", "--agent", "pi", "--model", "haiku"], w.env);
+  assert.equal(wrongModel.code, 1);
+  assert.match(wrongModel.stderr, /model must use provider\/model format/);
+  const wrongThinking = await runCli(["backfill", "1", "--dry-run", "--agent=claude", "--model=haiku", "--thinking", "off"], w.env);
+  assert.equal(wrongThinking.code, 1);
+  assert.match(wrongThinking.stderr, /With Claude Code, thinkingLevel must be/);
+  const unknown = await runCli(["backfill", "1", "--dry-run", "--agent", "codex"], w.env);
+  assert.equal(unknown.code, 1);
+  assert.match(unknown.stderr, /--agent requires auto, pi, or claude/);
+  assert.equal(await readFile(w.filePath, "utf8"), before);
+  assert.deepEqual(await calls(w.callsPath), []);
 });
 
 test("saved concurrency is shown by config and backfill without changing settings", async (t) => {

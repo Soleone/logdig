@@ -24,7 +24,7 @@ Originally made for Obsidian. Daily pages are ordinary Markdown with YYYY-MM-DD.
 
 - Node.js 22.19+; Pi or Claude Code installed and authenticated for real summarization.
 - CLI backfill defaults to four independent sessions in parallel; concurrency is configurable.
-- Reuses unchanged summaries; preserves handwritten content and manually edited daily blurbs.
+- Keeps saved summaries until asked to rewrite them with `--force`; preserves handwritten content and manually edited daily blurbs.
 - Small, Medium and Large summaries per work block; continuation links for resumed sessions.
 - Read-only dry run; real runs send selected, redacted evidence to the configured model and may incur charges.
 - Redaction is not a complete secret scanner. Summaries are not proof of completed work.

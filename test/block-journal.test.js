@@ -114,15 +114,22 @@ test("continuation creates a separate daily entry, preserves earlier notes, and 
   assert.equal(await readFile(f.dailyPath("2026-10-01"), "utf8"), laterDaily);
 });
 
-test("today's backfill updates overnight work on yesterday's note", async (t) => {
+test("today's backfill keeps yesterday's saved summary until a forced rewrite picks up overnight work", async (t) => {
   const f = await fixture(t);
   f.session.entries.length = 1;
   await writeSessions(f.model, [f.session], f.settings);
   f.session.entries.push(message("finished", "2026-10-01T02:00:00Z", "assistant", "Done with passing tests."));
-  const result = await writeSessions(f.model, [f.session], f.settings, { firstDate: "2026-10-01", lastDate: "2026-10-01" });
-  assert.deepEqual(result.errors, []);
-  assert.equal(result.entriesUpdated, 1);
-  assert.deepEqual(result.dates, ["2026-09-30"]);
+  const range = { firstDate: "2026-10-01", lastDate: "2026-10-01" };
+  const kept = await writeSessions(f.model, [f.session], f.settings, range);
+  assert.deepEqual(kept.errors, []);
+  assert.equal(kept.summariesReused, 1);
+  assert.equal(kept.entriesUpdated, 0);
+  assert.equal(f.prompts.length, 1);
+  assert.match(await readFile(f.dailyPath("2026-09-30"), "utf8"), /Summary 1\./);
+  const forced = await writeSessions(f.model, [f.session], f.settings, { ...range, force: true });
+  assert.deepEqual(forced.errors, []);
+  assert.equal(forced.entriesUpdated, 1);
+  assert.deepEqual(forced.dates, ["2026-09-30"]);
   assert.match(await readFile(f.dailyPath("2026-09-30"), "utf8"), /Summary 2\./);
   await assert.rejects(readFile(f.dailyPath("2026-10-01")), { code: "ENOENT" });
 });
@@ -241,60 +248,73 @@ test("renames, model switches, labels, system prompts, and extension state do no
   assert.equal(metadataOnly.sessionsSkipped, 1);
 });
 
-test("usage totals refresh without model requests or daily blurb edits", async (t) => {
+test("kept summaries keep their usage until a forced rewrite refreshes it", async (t) => {
   const f = await fixture(t);
   await writeSessions(f.model, [f.session], f.settings);
   const before = await readFile(f.dailyPath("2026-09-30"), "utf8");
+  const notePath = path.join(f.settings.cacheDirectory, "Sessions", "multi-day.md");
+  const usageBefore = parseSessionNote(await readFile(notePath, "utf8")).sessionUsage;
   f.session.entries.push({ type: "usage", timestamp: "2026-10-01T02:01:00Z", usage: { input: 20, output: 10, cacheRead: 100, cost: { total: 0.25 } } });
-  const updated = await writeSessions(f.model, [f.session], f.settings);
-  assert.deepEqual(updated.errors, []);
-  assert.equal(updated.summariesReused, 1);
-  assert.equal(updated.entriesSkipped, 1);
+  const kept = await writeSessions(f.model, [f.session], f.settings);
+  assert.deepEqual(kept.errors, []);
+  assert.equal(kept.summariesReused, 1);
+  assert.equal(kept.entriesSkipped, 1);
   assert.equal(f.prompts.length, 1);
   assert.equal(await readFile(f.dailyPath("2026-09-30"), "utf8"), before);
-  for (const file of [path.join(f.settings.cacheDirectory, "Sessions", "multi-day.md"), path.join(f.settings.cacheDirectory, "Entries", `${entryId(before)}.md`)]) {
-    assert.match(parseSessionNote(await readFile(file, "utf8")).sessionUsage, /^\$0\.25 ⚡100 ↑20 ↓10/);
-  }
+  assert.equal(parseSessionNote(await readFile(notePath, "utf8")).sessionUsage, usageBefore);
+  const forced = await writeSessions(f.model, [f.session], f.settings, { force: true });
+  assert.deepEqual(forced.errors, []);
+  assert.equal(f.prompts.length, 2);
+  assert.match(parseSessionNote(await readFile(notePath, "utf8")).sessionUsage, /^\$0\.25 ⚡100 ↑20 ↓10/);
 });
 
-test("model policy is order-independent and thinking levels invalidate only summary freshness", async (t) => {
+test("model and thinking changes keep saved summaries; only a forced rewrite applies the new policy", async (t) => {
   const f = await fixture(t);
   await writeSessions(f.model, [f.session], f.settings);
   const block = workBlocksForSession(f.session, f.settings.timeZone)[0];
   const initial = await inspectSessionSummary(f.model, f.settings.cacheDirectory, block);
   assert.deepEqual(summaryCachePolicy({}), { model: "Pi default" });
   const withEffort = { ...f.model, cachePolicy: summaryCachePolicy({ model: "test/fake", thinkingLevel: "high" }) };
-  const effort = await inspectSessionSummary(withEffort, f.settings.cacheDirectory, block);
-  const reordered = await inspectSessionSummary({ ...f.model, cachePolicy: { thinkingLevel: "high", model: "test/fake" } }, f.settings.cacheDirectory, block);
-  assert.notEqual(initial.cacheFingerprint, effort.cacheFingerprint);
-  assert.equal(effort.cacheFingerprint, reordered.cacheFingerprint);
-  assert.equal(initial.sourceFingerprint, effort.sourceFingerprint);
-  const updated = await writeSessions(withEffort, [f.session], f.settings);
-  assert.equal(updated.summariesCreated, 1);
-  assert.equal(updated.entriesUpdated, 1);
-  assert.equal(updated.sessionResults[0].blockId, block.blockId);
+  const kept = await inspectSessionSummary(withEffort, f.settings.cacheDirectory, block);
+  assert.equal(kept.reused, true);
+  assert.equal(kept.cacheFingerprint, initial.cacheFingerprint);
+  const reordered = await inspectSessionSummary({ ...f.model, cachePolicy: { thinkingLevel: "high", model: "test/fake" } }, f.settings.cacheDirectory, block, { force: true });
+  const forced = await inspectSessionSummary(withEffort, f.settings.cacheDirectory, block, { force: true });
+  assert.equal(forced.reused, false);
+  assert.notEqual(initial.cacheFingerprint, forced.cacheFingerprint);
+  assert.equal(forced.cacheFingerprint, reordered.cacheFingerprint);
+  assert.equal(forced.sourceFingerprint, initial.sourceFingerprint);
+  const unchanged = await writeSessions(withEffort, [f.session], f.settings);
+  assert.equal(unchanged.summariesCreated, 0);
+  assert.equal(unchanged.summariesReused, 1);
+  assert.equal(unchanged.entriesUpdated, 0);
+  assert.equal(f.prompts.length, 1);
+  const rewritten = await writeSessions(withEffort, [f.session], f.settings, { force: true });
+  assert.equal(rewritten.summariesCreated, 1);
+  assert.equal(rewritten.entriesUpdated, 1);
+  assert.equal(rewritten.sessionResults[0].blockId, block.blockId);
   assert.equal((await writeSessions(withEffort, [f.session], f.settings)).summariesReused, 1);
-  const max = { ...f.model, cachePolicy: summaryCachePolicy({ model: "test/fake", thinkingLevel: "max" }) };
-  const changed = await inspectSessionSummary(max, f.settings.cacheDirectory, block);
-  assert.equal(changed.reused, false);
-  assert.equal(changed.sourceFingerprint, initial.sourceFingerprint);
 });
 
-test("continuation updates preserve edited blurbs without duplicating generated continuation links", async (t) => {
+test("continuation blocks keep their blurbs and links until a forced rewrite", async (t) => {
   const f = await fixture(t);
   f.session.entries.push(message("resume", "2026-10-01T11:00:00Z"));
   await writeSessions(f.model, [f.session], f.settings);
-  const earlier = await readFile(f.dailyPath("2026-09-30"), "utf8");
   const later = await readFile(f.dailyPath("2026-10-01"), "utf8");
   await writeFile(f.dailyPath("2026-10-01"), later.replace("Summary 2.", "My edited continuation."));
   f.session.entries.push(message("more", "2026-10-01T12:00:00Z"));
-  const result = await writeSessions(f.model, [f.session], f.settings);
-  assert.deepEqual(result.errors, []);
-  assert.equal(result.entriesUpdated, 1);
+  const kept = await writeSessions(f.model, [f.session], f.settings);
+  assert.deepEqual(kept.errors, []);
+  assert.equal(kept.entriesUpdated, 0);
+  assert.equal(kept.summariesReused, 2);
+  assert.equal(f.prompts.length, 2);
+  assert.match(await readFile(f.dailyPath("2026-10-01"), "utf8"), /My edited continuation\./);
+  const forced = await writeSessions(f.model, [f.session], f.settings, { force: true });
+  assert.deepEqual(forced.errors, []);
+  assert.ok(forced.entriesUpdated >= 1);
   const updated = await readFile(f.dailyPath("2026-10-01"), "utf8");
   assert.match(updated, /My edited continuation\./);
   assert.equal((updated.match(/Continues \[\[/g) || []).length, 1);
-  assert.equal(await readFile(f.dailyPath("2026-09-30"), "utf8"), earlier);
 });
 
 test("legacy overnight rows migrate to the starting day, preserving snapshots and manual writing", async (t) => {
@@ -323,10 +343,15 @@ test("legacy overnight rows migrate to the starting day, preserving snapshots an
   assert.doesNotMatch(cleaned, /\*\*\[\[/);
   assert.equal(await readFile(old.entryPath, "utf8"), original);
   assert.equal((await writeSessions(f.model, [f.session], f.settings)).entriesSkipped, 1);
-  assert.equal(f.prompts.length, 1);
+  assert.equal(f.prompts.length, 0);
   f.session.entries.push(message("more", "2026-10-01T03:00:00Z"));
+  const kept = await writeSessions(f.model, [f.session], f.settings, { dryRun: true });
+  assert.equal(kept.entriesUpdated, 0);
+  assert.equal(f.prompts.length, 0);
+  const rewritten = await writeSessions(f.model, [f.session], f.settings, { force: true });
+  assert.deepEqual(rewritten.errors, []);
+  assert.equal(rewritten.entriesUpdated, 1);
   const evolved = await writeSessions(f.model, [f.session], f.settings, { dryRun: true });
-  assert.equal(evolved.entriesUpdated, 1);
   assert.equal(evolved.sessionResults[0].legacyEntry, false);
 });
 
@@ -346,7 +371,7 @@ test("a missing snapshot is repaired from cache before a continuation can link t
   assert.equal(result.sessionResults[1].continuationOf, id);
 });
 
-test("timezone changes that merge blocks remove obsolete rows without deleting their snapshots", async (t) => {
+test("timezone changes that merge blocks keep saved summaries; a forced rewrite removes obsolete rows without deleting their snapshots", async (t) => {
   const f = await fixture(t);
   f.session.entries = [message("start", "2026-10-01T22:00:00Z"), message("resume", "2026-10-02T02:00:00Z")];
   const original = await writeSessions(f.model, [f.session], f.settings);
@@ -355,13 +380,18 @@ test("timezone changes that merge blocks remove obsolete rows without deleting t
   const later = await readFile(f.dailyPath("2026-10-02"), "utf8");
   const snapshotPath = path.join(f.settings.cacheDirectory, "Entries", `${entryId(later)}.md`);
   const snapshot = await readFile(snapshotPath, "utf8");
-  const changed = await writeSessions(f.model, [f.session], { ...f.settings, timeZone: "America/Toronto" });
+  const toronto = { ...f.settings, timeZone: "America/Toronto" };
+  const kept = await writeSessions(f.model, [f.session], toronto);
+  assert.deepEqual(kept.errors, []);
+  assert.equal(kept.summariesCreated, 0);
+  assert.equal(f.prompts.length, 2);
+  const changed = await writeSessions(f.model, [f.session], toronto, { force: true });
   assert.deepEqual(changed.errors, []);
   assert.equal(changed.entriesUpdated, 1);
   assert.equal(changed.sessionResults.length, 1);
   assert.doesNotMatch(await readFile(f.dailyPath("2026-10-02"), "utf8"), /\*\*\[\[/);
   assert.equal(await readFile(snapshotPath, "utf8"), snapshot);
-  const repeated = await writeSessions(f.model, [f.session], { ...f.settings, timeZone: "America/Toronto" });
+  const repeated = await writeSessions(f.model, [f.session], toronto);
   assert.equal(repeated.entriesSkipped, 1);
   assert.equal(f.prompts.length, 3);
 });

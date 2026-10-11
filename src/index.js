@@ -83,11 +83,15 @@ function journalProgress(ctx) {
 async function runBackfill(ctx, argument) {
   const settings = await journalSettings();
   const args = argument.split(/\s+/).filter(Boolean);
+  if (args.some((arg) => arg === "--agent" || arg.startsWith("--agent="))) {
+    throw new Error("/journal always uses Pi. Use 'logdig backfill --agent claude' in a terminal for Claude Code");
+  }
   const dryRun = args.includes("--dry-run");
-  const rangeArgs = args.filter((arg) => arg !== "--dry-run");
-  if (rangeArgs.length > 1) throw new Error("Usage: /journal backfill [number-of-days|all] [--dry-run]");
+  const force = args.includes("--force");
+  const rangeArgs = args.filter((arg) => !["--dry-run", "--force"].includes(arg));
+  if (rangeArgs.length > 1) throw new Error("Usage: /journal backfill [number-of-days|all] [--dry-run] [--force]");
   const range = parseBackfillArgument(rangeArgs[0]);
-  notify(ctx, dryRun ? "LogDig preview: no model requests or file changes." : "LogDig: checking recent sessions. Only new or changed summaries need model requests.");
+  notify(ctx, dryRun ? "LogDig preview: no model requests or file changes." : "LogDig: checking recent sessions. Only missing summaries need model requests.");
   const found = await collectSessions({
     sessionDirectory: settings.sessionDirectory,
     claudeSessionDirectory: await claudeHistoryDirectory(settings),
@@ -96,7 +100,7 @@ async function runBackfill(ctx, argument) {
     currentSession: currentSession(ctx),
   });
   const client = dryRun ? { cachePolicy: summaryCachePolicy(settings) } : extensionModelClient(ctx, settings);
-  const result = await writeSessions(client, found.sessions, settings, { ...found, dryRun, onProgress: journalProgress(ctx) });
+  const result = await writeSessions(client, found.sessions, settings, { ...found, dryRun, force, onProgress: journalProgress(ctx) });
   const warnings = [...found.warnings, ...result.errors];
   const summaryCount = `${result.summariesCreated} ${result.summariesCreated === 1 ? "summary" : "summaries"}`;
   const entryCount = `${result.entriesAppended} daily ${result.entriesAppended === 1 ? "entry" : "entries"}`;
@@ -117,9 +121,11 @@ async function runBackfill(ctx, argument) {
 function helpText() {
   return [
     "/journal                 summarize and log the current session",
+    "/journal --force         rewrite the current session's saved summary",
     "/journal backfill [N]    process sessions active in the last N days (default 3)",
     "/journal backfill all    process every discoverable Pi session",
     "/journal backfill 1 --dry-run    preview without model requests or file changes",
+    "Saved summaries are kept. Add --force to rewrite them for the selected sessions.",
     "",
     "Configure with 'logdig init' or, from a checkout, 'node ./bin/logdig.js init'.",
     "Automatic capture is opt-in. Full summaries live in your configured cache.",
@@ -131,7 +137,8 @@ export default function (pi) {
   pi.registerCommand("journal", {
     description: "Cache layered session summaries and keep Obsidian journal entries current",
     handler: async (argument, ctx) => {
-      const [command, ...rest] = argument.trim().split(/\s+/).filter(Boolean);
+      const words = argument.trim().split(/\s+/).filter(Boolean);
+      const [command, ...rest] = words;
       if (["help", "--help", "-h"].includes(command)) {
         notify(ctx, helpText());
         return;
@@ -146,7 +153,9 @@ export default function (pi) {
           await runBackfill(ctx, rest.join(" "));
           return;
         }
-        if ((command && command !== "current") || rest.length) {
+        const force = words.includes("--force");
+        const others = words.filter((word) => word !== "--force");
+        if ((others[0] && others[0] !== "current") || others.length > 1) {
           notify(ctx, helpText(), "warning");
           return;
         }
@@ -154,13 +163,14 @@ export default function (pi) {
         const settings = await journalSettings();
         const session = currentSession(ctx);
         if (!session) throw new Error("No active Pi session is available");
-        const result = await writeSessions(extensionModelClient(ctx, settings), [session], settings, { onProgress: journalProgress(ctx) });
+        const result = await writeSessions(extensionModelClient(ctx, settings), [session], settings, { force, onProgress: journalProgress(ctx) });
         if (result.errors.length) throw new Error(result.errors.join("; "));
         if (!result.dailyPaths.length) {
           notify(ctx, "Nothing to journal yet. Send a message to Pi, then run /journal.");
         } else {
           const saved = result.entriesAppended || result.entriesUpdated;
-          notify(ctx, `${saved ? `Saved ${settings.dailySummary} summary` : "Already in your journal"}: ${result.dailyPaths.join(", ")}\nFull summaries: ${path.join(settings.cacheDirectory, "Sessions")}`, "success");
+          const kept = !saved && !force ? "\nThe saved summary was kept. Run /journal --force to rewrite it with the latest messages." : "";
+          notify(ctx, `${saved ? `Saved ${settings.dailySummary} summary` : "Already in your journal"}: ${result.dailyPaths.join(", ")}${kept}\nFull summaries: ${path.join(settings.cacheDirectory, "Sessions")}`, "success");
         }
       } catch (error) {
         notify(ctx, `LogDig could not save: ${error.message}`, "error");

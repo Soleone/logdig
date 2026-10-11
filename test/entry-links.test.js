@@ -18,7 +18,7 @@ async function workspace(t) {
   return { root, daily, cache, entry };
 }
 
-test("evolving a session replaces its daily entry and retains the previous immutable snapshot", async (t) => {
+test("evolving a session keeps its daily entry until a forced rewrite replaces it and retains the previous immutable snapshot", async (t) => {
   const { daily, cache } = await workspace(t);
   const settings = { cacheDirectory: cache, dailyDirectory: daily, dailyHeader: "# Log", dailySummary: "small", timeZone: "UTC" };
   const session = {
@@ -39,11 +39,15 @@ test("evolving a session replaces its daily entry and retains the previous immut
 
   const firstDaily = await readFile(dailyPath, "utf8");
   session.entries.push({ type: "message", timestamp: "2026-09-28T10:00:00Z", message: { role: "user", content: "Second change." } });
-  const preview = await writeSessions(model, [session], settings, { dryRun: true });
+  const kept = await writeSessions(model, [session], settings, { dryRun: true });
+  assert.equal(kept.entriesUpdated, 0);
+  assert.equal(kept.summariesReused, 1);
+  assert.equal(calls, 1);
+  const preview = await writeSessions(model, [session], settings, { dryRun: true, force: true });
   assert.equal(preview.entriesUpdated, 1);
   assert.equal(calls, 1);
   assert.equal(await readFile(dailyPath, "utf8"), firstDaily);
-  const updated = await writeSessions(model, [session], settings);
+  const updated = await writeSessions(model, [session], settings, { force: true });
   assert.deepEqual(updated.errors, []);
   assert.equal(updated.entriesUpdated, 1);
   const dailyText = await readFile(dailyPath, "utf8");
@@ -98,7 +102,7 @@ test("evolving a legacy duplicate session collapses its daily rows and keeps pri
   await writeFile(legacySnapshotPath, legacySnapshot);
   await writeFile(dailyPath, `${firstDaily.trimEnd()}\n\n**[[${legacyId}|10:00]]**\n\nOld duplicate.\n`);
 
-  const updated = await writeSessions(model, [session], settings);
+  const updated = await writeSessions(model, [session], settings, { force: true });
   assert.deepEqual(updated.errors, []);
   assert.equal(updated.entriesUpdated, 1);
   const dailyText = await readFile(dailyPath, "utf8");
@@ -128,7 +132,7 @@ test("evolving a session preserves a manually edited daily blurb", async (t) => 
   const original = await readFile(dailyPath, "utf8");
   await writeFile(dailyPath, original.replace("Generated 1.", "My edited note."));
   session.entries.push({ type: "message", timestamp: "2026-09-28T10:00:00Z", message: { role: "user", content: "Second change." } });
-  const updated = await writeSessions(model, [session], settings);
+  const updated = await writeSessions(model, [session], settings, { force: true });
   assert.equal(updated.entriesUpdated, 1);
   const dailyText = await readFile(dailyPath, "utf8");
   assert.match(dailyText, /My edited note\./);
@@ -155,7 +159,7 @@ test("continuous overnight work updates its original daily entry instead of movi
   const oldSnapshot = await readFile(path.join(cache, "Entries", `${oldId}.md`), "utf8");
 
   session.entries.push({ type: "message", timestamp: "2026-09-29T00:10:00Z", message: { role: "user", content: "Continue work." } });
-  const updated = await writeSessions(model, [session], settings);
+  const updated = await writeSessions(model, [session], settings, { force: true });
   assert.equal(updated.entriesUpdated, 1);
   const newDaily = await readFile(oldDailyPath, "utf8");
   await assert.rejects(readFile(path.join(daily, "2026-09-29.md")), { code: "ENOENT" });
