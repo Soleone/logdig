@@ -1,7 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/Soleone/showcase/main/schema/showcase.schema.json",
   "title": "LogDig",
-  "pitch": "Your Pi history. A journal you can read.",
+  "pitch": "Turn your Pi and Claude Code history into a daily journal you can read.",
+  "description": "Backfill a week of work in parallel, keep the short version in your notes and click a timestamp for the details. Your handwritten notes are never overwritten, and it works with Obsidian or plain Markdown.",
   "kind": "cli",
   "year": 2026,
   "repo": "https://github.com/Soleone/logdig",
