@@ -30,6 +30,7 @@ test("launch demo uses ten synthetic sessions, real parallel writes, and a no-re
   assert.equal(recording.summaries.length, 10);
   for (const summary of recording.summaries) {
     for (const level of ["small", "medium", "large"]) assert.ok(summary.layers[level]);
+    assert.doesNotMatch(summary.layers.small, /^I\b/);
   }
   const html = await readFile(path.join(root, "index.html"), "utf8");
   assert.ok(!html.includes("/* RECORDING */ null"));

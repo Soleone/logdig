@@ -10,16 +10,16 @@ import { parseSessionNote } from "../src/journal.js";
 
 export const DEMO_DATE = "2026-10-01";
 const PROJECTS = [
-  ["atlas", "I added keyboard navigation to the command palette.", "Mapped arrow keys and Enter to the existing command actions; added a focused regression test."],
-  ["atlas", "I fixed a stale search result after switching workspaces.", "Reset the search state at the workspace boundary and checked the empty-result case."],
-  ["fieldnotes", "I made daily-note links easier to scan.", "Kept timestamps inline and removed redundant labels from the journal view."],
-  ["relay", "I traced a reconnect loop to an expired token.", "Found the retry loop. The refresh-path fix is still pending."],
-  ["atlas", "I tightened the export dialog and its error copy.", "Simplified the options and made the failure message point to a retry."],
-  ["fieldnotes", "I preserved handwritten entries during import.", "Changed the importer to update only its own generated section."],
-  ["relay", "I added a regression test for interrupted uploads.", "Covered a connection closing between chunks; verified the retry keeps its offset."],
-  ["atlas", "I reduced duplicate requests in the activity feed.", "Reused the in-flight fetch instead of starting another on focus."],
-  ["fieldnotes", "I checked how overnight work appears in the journal.", "Kept continuous work on its starting date and reviewed the next-day continuation."],
-  ["relay", "I documented the remaining reconnect work.", "Wrote a handoff with the failing case and the next verification step."],
+  ["atlas", "Added keyboard navigation to the command palette.", "Mapped arrow keys and Enter to the existing command actions; added a focused regression test."],
+  ["atlas", "Fixed a stale search result after switching workspaces.", "Reset the search state at the workspace boundary and checked the empty-result case."],
+  ["fieldnotes", "Made daily-note links easier to scan.", "Kept timestamps inline and removed redundant labels from the journal view."],
+  ["relay", "Traced a reconnect loop to an expired token.", "Found the retry loop. The refresh-path fix is still pending."],
+  ["atlas", "Tightened the export dialog and its error copy.", "Simplified the options and made the failure message point to a retry."],
+  ["fieldnotes", "Preserved handwritten entries during import.", "Changed the importer to update only its own generated section."],
+  ["relay", "Added a regression test for interrupted uploads.", "Covered a connection closing between chunks; verified the retry keeps its offset."],
+  ["atlas", "Reduced duplicate requests in the activity feed.", "Reused the in-flight fetch instead of starting another on focus."],
+  ["fieldnotes", "Checked how overnight work appears in the journal.", "Kept continuous work on its starting date and reviewed the next-day continuation."],
+  ["relay", "Documented the remaining reconnect work.", "Wrote a handoff with the failing case and the next verification step."],
 ];
 // A slower first response makes out-of-order completion visible without a speed claim.
 const DELAYS = [6200, 2500, 3300, 4200, 2600, 3200, 2400, 3400, 2800, 2600];

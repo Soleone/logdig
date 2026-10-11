@@ -32,7 +32,7 @@ test("session cache stores all three layers and round-trips its metadata", () =>
   assert.equal(parsed.model, "test/fake");
   assert.equal(parsed.sourceFingerprint, "source-123");
   assert.equal(parsed.cacheFingerprint, "cache-123");
-  assert.equal(parsed.summaryVersion, "work-block-layers-v3");
+  assert.equal(parsed.summaryVersion, "work-block-layers-v4");
   assert.deepEqual(parsed.summary, summary);
   assert.match(markdown, /^# Small/m);
   assert.match(markdown, /^# Medium/m);
@@ -220,15 +220,19 @@ test("JSON extraction tolerates prose, unrelated braces, and braces inside JSON 
   assert.equal(result.small, 'Found {the issue} and quoted "text".');
 });
 
-test("final prompt requests a first-person diary and current-block dates without importing background dates", async () => {
+test("final prompt requests natural subject-light wording and current-block dates without importing background dates", async () => {
   let prompt;
   await summarizeSession({ complete: async (value) => { prompt = value; return JSON.stringify(summary); } }, {
     ...session,
     context: [{ date: "2026-09-25", text: "Earlier implementation and checks." }],
     events: [{ date: "2026-09-27", time: "10:25", project: "demo", sessionId: "01-session", kind: "assistant outcome", text: "Checks reported passing." }],
   });
-  assert.match(prompt, /all three layers as the user's personal diary: use 'I', never 'the user'/);
-  assert.match(prompt, /use 'we' only when it clarifies collaboration with the agent/);
+  assert.match(prompt, /natural, informal journal voice/);
+  assert.match(prompt, /do not force first-person language or start every entry with I/);
+  assert.match(prompt, /'Added Claude session discovery\.' rather than 'I added Claude session discovery\.'/);
+  assert.match(prompt, /Use 'I' or 'we' only when they improve clarity/);
+  assert.match(prompt, /use 'we' only for genuine collaboration/);
+  assert.match(prompt, /Do not phrase completed work as commands/);
   assert.match(prompt, /Known local work-block dates: 2026-09-27\./);
   assert.doesNotMatch(prompt, /Known local work-block dates:.*2026-09-25/);
   assert.match(prompt, /completed commits versus edits still awaiting commit/);
@@ -253,8 +257,8 @@ test("chunked prompts preserve date changes even if the model digest loses dates
     assert.match(prompt, /Retain the source date on each bullet/);
     assert.match(prompt, /completed commits versus edits awaiting commit/);
   }
-  assert.match(prompts.at(-1), /all three layers as the user's personal diary: use 'I', never 'the user'/);
-  assert.match(prompts.at(-1), /use 'we' only when it clarifies collaboration with the agent/);
+  assert.match(prompts.at(-1), /do not force first-person language or start every entry with I/);
+  assert.match(prompts.at(-1), /'Added Claude session discovery\.' rather than 'I added Claude session discovery\.'/);
   assert.match(prompts.at(-1), /Known local work-block dates: 2026-09-27, 2026-09-28\./);
   assert.match(prompts.at(-1), /attached to the action or result they record/);
 });
@@ -266,11 +270,11 @@ test("prompt and format version changes keep existing summaries until a forced r
   const current = await saveSessionSummary(client, root, session);
   // A note written by an older LogDig: different version, different cache key, same evidence and settings.
   const oldFingerprint = createHash("sha256").update(JSON.stringify([
-    "work-block-layers-v2", JOURNAL_SYSTEM_PROMPT, 16000, current.sourceFingerprint, [["model", "Pi default"]],
+    "work-block-layers-v3", JOURNAL_SYSTEM_PROMPT, 16000, current.sourceFingerprint, [["model", "Pi default"]],
   ])).digest("hex");
   const markdown = (await readFile(current.sessionPath, "utf8"))
     .replace(`cacheFingerprint: "${current.cacheFingerprint}"`, `cacheFingerprint: "${oldFingerprint}"`)
-    .replace('summaryVersion: "work-block-layers-v3"', 'summaryVersion: "work-block-layers-v2"');
+    .replace('summaryVersion: "work-block-layers-v4"', 'summaryVersion: "work-block-layers-v3"');
   await writeFile(current.sessionPath, markdown);
 
   const inspected = await inspectSessionSummary(client, root, session);
