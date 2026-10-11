@@ -50,6 +50,7 @@ test("Pi client makes a one-shot, no-tools, no-session request and honors model 
   assert.equal(result.usages.length, 1);
   assert.equal(result.provider, "test-provider");
   assert.equal(result.model, "test-model");
+  assert.equal(result.stopReason, "stop");
   assert.equal(result.usages[0].cacheRead, 60);
   assert.equal(launch.command, "pi-test");
   assert.deepEqual(launch.args.slice(0, 2), ["--mode", "json"]);
@@ -95,6 +96,13 @@ test("Pi client passes thinking independently of model and allows slow reasoning
     }
     assert.equal(delays.at(-1), thinkingLevel && thinkingLevel !== "off" ? 30 * 60_000 : 5 * 60_000);
   }
+});
+
+test("Pi client preserves length stop reason so the journal layer can retry truncated text", async () => {
+  const fake = fakeSpawn({ output: jsonOutput('{"small":', undefined, "length") });
+  const result = await createPiModelClient({ piCommand: "pi" }, { spawnProcess: fake.spawnProcess }).complete("prompt");
+  assert.equal(result.text, '{"small":');
+  assert.equal(result.stopReason, "length");
 });
 
 test("Pi client aggregates completed responses and rejects failed JSON runs", async () => {

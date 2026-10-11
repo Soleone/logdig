@@ -58,8 +58,10 @@ test("eval preserves invalid JSON output and its billed usage before parsing", a
   const result = await generateCase({ complete: async () => ({ text: "not JSON", usages: [usage] }) }, evidence, async (request) => persisted.push(request));
   assert.equal(result.status, "failed");
   assert.match(result.error, /JSON object/);
+  assert.equal(persisted.length, 2, "one format retry is persisted");
   assert.equal(persisted[0].text, "not JSON");
-  assert.equal(result.metrics.costUsd, 0.01);
+  assert.match(persisted[1].prompt, /previous reply could not be used/);
+  assert.equal(result.metrics.costUsd, 0.02, "usage from both billed attempts is retained");
   assert.deepEqual(aggregateUsage([]), {});
   const rejected = await generateCase({ complete: async () => { throw new Error("quota exceeded"); } }, evidence);
   assert.equal(rejected.requests[0].error, "quota exceeded");

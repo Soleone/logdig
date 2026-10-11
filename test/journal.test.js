@@ -118,6 +118,108 @@ test("large session evidence is summarized in bounded chunks before final layers
   assert.equal(parseSessionNote(await readFile(result.sessionPath, "utf8")).logUsage, note.logUsage);
 });
 
+test("malformed model JSON is retried once and both attempts contribute usage", async () => {
+  const prompts = [];
+  const usages = [];
+  const usage = { input: 10, output: 2 };
+  const modelClient = { complete: async (prompt) => {
+    prompts.push(prompt);
+    return {
+      text: prompts.length === 1 ? '{"small":"partial",}' : JSON.stringify(summary),
+      usage,
+    };
+  } };
+
+  const result = await summarizeSession(modelClient, {
+    ...session,
+    events: [{ date: session.date, time: session.time, project: session.project, sessionId: session.header.id, kind: "user intent", text: "Fix a parser." }],
+  }, (entry) => usages.push(entry));
+
+  assert.deepEqual(result, summary);
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /previous reply could not be used/);
+  assert.equal(usages.length, 2, "the failed response may still be billable");
+});
+
+test("valid JSON missing required summary fields is retried", async () => {
+  const prompts = [];
+  const modelClient = { complete: async (prompt) => {
+    prompts.push(prompt);
+    return prompts.length === 1
+      ? JSON.stringify({ small: "Partial summary." })
+      : JSON.stringify(summary);
+  } };
+
+  const result = await summarizeSession(modelClient, {
+    ...session,
+    events: [{ date: session.date, time: session.time, project: session.project, sessionId: session.header.id, kind: "user intent", text: "Fix a parser." }],
+  });
+
+  assert.deepEqual(result, summary);
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /missing the 'medium' summary/);
+});
+
+test("a Pi length stop retries incomplete JSON with a useful correction", async () => {
+  const prompts = [];
+  const modelClient = { complete: async (prompt) => {
+    prompts.push(prompt);
+    return prompts.length === 1
+      ? { text: '{"small":', stopReason: "length" }
+      : { text: JSON.stringify(summary), stopReason: "stop" };
+  } };
+
+  const result = await summarizeSession(modelClient, {
+    ...session,
+    events: [{ date: session.date, time: session.time, project: session.project, sessionId: session.header.id, kind: "user intent", text: "Fix a parser." }],
+  });
+
+  assert.deepEqual(result, summary);
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /stopReason=length/);
+});
+
+test("a bad timeline chunk is retried without repeating earlier successful chunks", async () => {
+  const prompts = [];
+  let timelineCalls = 0;
+  const events = ["first", "second"].map((label, index) => ({
+    date: session.date,
+    time: `10:0${index}`,
+    project: session.project,
+    sessionId: session.header.id,
+    kind: "assistant outcome",
+    text: `${label} ${"evidence ".repeat(1100)}`,
+  }));
+  const modelClient = { complete: async (prompt) => {
+    prompts.push(prompt);
+    if (!prompt.includes("Extract a compact factual timeline")) return JSON.stringify(summary);
+    timelineCalls++;
+    if (timelineCalls === 2) return "{broken JSON,}";
+    return JSON.stringify({ timeline: "10:00 Reviewed the evidence." });
+  } };
+
+  const result = await summarizeSession(modelClient, { ...session, events });
+
+  assert.deepEqual(result, summary);
+  assert.equal(prompts.length, 4, "two chunks, one retry, then the final summary");
+  assert.equal(timelineCalls, 3);
+  assert.match(prompts[0], /first/);
+  assert.match(prompts[1], /second/);
+  assert.doesNotMatch(prompts[1], /first evidence/);
+  assert.match(prompts[2], /previous reply could not be used/);
+  assert.match(prompts[2], /second/);
+});
+
+test("JSON extraction tolerates prose, unrelated braces, and braces inside JSON strings", async () => {
+  const wrapped = `Preamble {}. ${JSON.stringify({ ...summary, small: 'Found {the issue} and quoted "text".' })} trailing prose.`;
+  const result = await summarizeSession({ complete: async () => wrapped }, {
+    ...session,
+    events: [{ date: session.date, time: session.time, project: session.project, sessionId: session.header.id, kind: "user intent", text: "Fix a parser." }],
+  });
+
+  assert.equal(result.small, 'Found {the issue} and quoted "text".');
+});
+
 test("final prompt requests a first-person diary and current-block dates without importing background dates", async () => {
   let prompt;
   await summarizeSession({ complete: async (value) => { prompt = value; return JSON.stringify(summary); } }, {
