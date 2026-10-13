@@ -8,6 +8,8 @@ Turn saved [Pi](https://pi.dev) and Claude Code sessions into daily Markdown not
 
 <sub>Ten synthetic sessions, canned model responses, real backfill pipeline. Illustrative timing, not a model benchmark. [Still image](https://github.com/Soleone/logdig/blob/main/docs/launch/assets/hero.png) · [MP4 demo](https://github.com/Soleone/logdig/blob/main/docs/launch/assets/demo.mp4)</sub>
 
+**[Try it in your browser](https://logdig.soleone.xyz)**, no install. The real CLI runs on ten sample sessions, with canned summaries in place of a model.
+
 ## Remember the work, not just the chat
 
 - **Catch up in parallel.** Four independent sessions at once by default, with live progress and configurable concurrency.
