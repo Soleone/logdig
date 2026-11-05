@@ -1,5 +1,6 @@
 {
   "project": "../..",
+  "skin": "https://raw.githubusercontent.com/Soleone/showcase-live-kit/main/terminal",
   "pitch": "Your Pi history. A journal you can read. This is the real CLI, running in your browser on ten sample sessions.",
   "mount": {
     "node_modules/logdig": {
